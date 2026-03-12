@@ -4,7 +4,7 @@ skipFrames = 2
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
-task.wait(3)
+task.wait(3.5)
 local hooked = {}
 
 for _, obj in getgc() do
@@ -639,7 +639,7 @@ end
 end)
 
 -- [[ Main Logic Loop ]]
-RunService.RenderStepped:Connect(function()
+RunService.Heartbeat:Connect(function()
 -- Frame skipping to prevent freeze
 frameCount = frameCount + 1
 if frameCount % (skipFrames + 1) ~= 0 then return end
