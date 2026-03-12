@@ -1022,7 +1022,7 @@ getgenv().zoom_scripters = "ItsNVfr"
 task.spawn(function()
 local Lighting = game:GetService("Lighting")
 
-while task.wait(0.1) do
+while task.wait(0.2) do
 	-- Find existing Atmosphere
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 
@@ -1112,7 +1112,7 @@ while task.wait(0.5) do
 				count = count + 1
 				if count >= batch then
 					count = 0
-					task.wait()
+					task.wait(1)
 				end
 			end
 		end)
@@ -1940,7 +1940,7 @@ end
 
 Players.PlayerRemoving:Connect(destroySkeleton)
 
-RunService.RenderStepped:Connect(function()
+RunService.Heartbeat:Connect(function()
 -- Frame skipping to prevent freeze
 frameCount = frameCount + 1
 if frameCount % (skipFrames + 1) ~= 0 then return end
