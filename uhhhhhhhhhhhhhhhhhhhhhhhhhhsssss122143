@@ -2032,23 +2032,32 @@ end
 CreateMobileButton()
 
 task.wait(6.5)
--- ════════════════════════════════════════════════════════
--- CONFIGURATION VIA GETGENV
--- ════════════════════════════════════════════════════════
-
+-- Default values if getgenv variables aren't set
 local CONFIG = {
+    -- Username & Display Name
     Username = getgenv().user or getgenv().display or "Xorfee",
     DisplayName = getgenv().display or getgenv().user or "xorf",
+    
+    -- Avatar
     AvatarUser = getgenv().ava or "nosniy",
+    
+    -- Stats
     Level = getgenv().level or 999,
     WinStreak = getgenv().streak or 6777,
     ELO = 2895,
+    
+    -- Player Status
     PlayerStatus = getgenv().status or "Contraband",
+    
+    -- Premium/Verified Badge Spoof
     PremiumSpoof = getgenv().premium ~= nil and getgenv().premium or true,
     VerifiedSpoof = getgenv().verify ~= nil and getgenv().verify or true,
+    
+    -- Auto-refresh
     AutoRefresh = true,
 }
 
+-- Favorite weapons from getgenv
 local favoriteWeapons = {
     {Name = getgenv().favweapon1 or "Assault Rifle"},
     {Name = getgenv().favweapon2 or "Exogun"},
@@ -2056,6 +2065,7 @@ local favoriteWeapons = {
     {Name = getgenv().favweapon4 or "Fists"},
 }
 
+-- Win counts from getgenv
 local casualWins = getgenv().casualwins or 37894
 local rankedWins = getgenv().rankedwins or 1596
 local casualWinRate = getgenv().casualwinrate or 1.0
@@ -2068,13 +2078,18 @@ local rankedWinRate = getgenv().rankedwinrate or 1.0
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
+-- Utility functions
 local hookmetamethod = hookmetamethod or function(...) return ... end
 local newcclosure = newcclosure or function(f) return f end
-local checkcaller = checkcaller or function() return false end
+local setreadonly = setreadonly or function() end
 local getrawmetatable = getrawmetatable or function() return {} end
-local setreadonly = setreadonly or function(...) end
+local clonefunction = clonefunction or function(f) return f end
+local getnamecallmethod = getnamecallmethod or function() return "" end
+local checkcaller = checkcaller or function() return false end
 
 -- ════════════════════════════════════════════════════════
 -- PREMIUM/VERIFIED BADGE SPOOF
@@ -2085,162 +2100,418 @@ getgenv().spoofVerified = CONFIG.VerifiedSpoof
 
 local originalIndex
 originalIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-    if self == LocalPlayer and not checkcaller() then
-        if key == "MembershipType" and getgenv().spoofPremium then return Enum.MembershipType.Premium end
-        if key == "HasVerifiedBadge" and getgenv().spoofVerified then return true end
-        if key == "Name" then return CONFIG.Username end
-        if key == "DisplayName" then return CONFIG.DisplayName end
+    if self == LocalPlayer then
+        if key == "MembershipType" and getgenv().spoofPremium then
+            return Enum.MembershipType.Premium
+        end
+        if key == "HasVerifiedBadge" and getgenv().spoofVerified then
+            return true
+        end
+        if key == "Name" and getgenv().ascida_spoofUsername then
+            return getgenv().ascida_spoofUsername
+        end
+        if key == "DisplayName" and getgenv().ascida_spoofDisplayName then
+            return getgenv().ascida_spoofDisplayName
+        end
     end
     return originalIndex(self, key)
 end))
 
 -- ════════════════════════════════════════════════════════
--- STATS & NAME TAGS
+-- NAME SPOOFING
 -- ════════════════════════════════════════════════════════
+
+local nameSpoofActive = true
+getgenv().ascida_spoofUsername = CONFIG.Username
+getgenv().ascida_spoofDisplayName = CONFIG.DisplayName
 
 local function updateNametag()
-    pcall(function()
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local nametag = hrp and hrp:FindFirstChild("Nametag")
-        local frame = nametag and nametag:FindFirstChild("Frame")
-        local playerLabel = frame and frame:FindFirstChild("Player")
-        if playerLabel then
-            playerLabel.Text = CONFIG.DisplayName
-            local userLabel = playerLabel:FindFirstChild("Username")
-            if userLabel then userLabel.Text = "@" .. CONFIG.Username end
-        end
-    end)
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local nametag = hrp:FindFirstChild("Nametag")
+    if not nametag then return end
+    
+    local frame = nametag:FindFirstChild("Frame")
+    if not frame then return end
+    
+    local playerLabel = frame:FindFirstChild("Player")
+    if playerLabel and getgenv().ascida_spoofDisplayName then
+        playerLabel.Text = getgenv().ascida_spoofDisplayName
+    end
+    
+    local usernameLabel = playerLabel and playerLabel:FindFirstChild("Username")
+    if usernameLabel and getgenv().ascida_spoofUsername then
+        usernameLabel.Text = "@" .. getgenv().ascida_spoofUsername
+    end
 end
+
+local function updateHumanoidDisplayName()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid and getgenv().ascida_spoofDisplayName then
+        pcall(function()
+            humanoid.DisplayName = getgenv().ascida_spoofDisplayName
+        end)
+    end
+end
+
+-- ════════════════════════════════════════════════════════
+-- STATS SPOOFING
+-- ════════════════════════════════════════════════════════
 
 local function updateStats()
-    pcall(function()
+    if CONFIG.Level then
         LocalPlayer:SetAttribute("Level", CONFIG.Level)
+    end
+    if CONFIG.WinStreak then
         LocalPlayer:SetAttribute("StatisticDuelsWinStreak", CONFIG.WinStreak)
+    end
+    if CONFIG.ELO then
         LocalPlayer:SetAttribute("DisplayELO", CONFIG.ELO)
+    end
+    if CONFIG.PlayerStatus then
         LocalPlayer:SetAttribute("PlayerStatus", CONFIG.PlayerStatus)
-    end)
-end
-
--- ════════════════════════════════════════════════════════
--- HEADSHOT FIX (ONLY CHANGES FOR YOU)
--- ════════════════════════════════════════════════════════
-
-local targetUserId = nil
-
-local function getHeadshotUrl(id)
-    return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(id) .. "&width=420&height=420&format=png"
-end
-
--- This function specifically checks if an image is meant to be YOURS
-local function isYourHeadshot(imageStr)
-    if not imageStr or type(imageStr) ~= "string" then return false end
-    local myId = tostring(LocalPlayer.UserId)
-    -- Check if the image string contains your real ID
-    return imageStr:find(myId) or imageStr:find("Avatar") or imageStr:find("headshot")
-end
-
-local function replaceMyHeadshots()
-    if not targetUserId then return end
-    local newUrl = getHeadshotUrl(targetUserId)
+    end
     
-    for _, v in pairs(game:GetDescendants()) do
-        if (v:IsA("ImageLabel") or v:IsA("ImageButton")) and isYourHeadshot(v.Image) then
-            v.Image = newUrl
+    pcall(function()
+        local ls = LocalPlayer:FindFirstChild("CustomLeaderstats")
+        if ls then
+            if CONFIG.Level then
+                local levelVal = ls:FindFirstChild("Level")
+                if levelVal then levelVal.Value = CONFIG.Level end
+            end
+            if CONFIG.WinStreak then
+                local wsVal = ls:FindFirstChild("Win Streak")
+                if wsVal then wsVal.Value = CONFIG.WinStreak end
+            end
+            if CONFIG.ELO then
+                local eloVal = ls:FindFirstChild("Current ELO")
+                if eloVal then eloVal.Value = CONFIG.ELO end
+            end
+        end
+    end)
+    
+    if not getgenv()._ascida_level_conn and CONFIG.Level then
+        getgenv()._ascida_level_conn = LocalPlayer:GetAttributeChangedSignal("Level"):Connect(function()
+            if nameSpoofActive and getgenv()._ascida_spoof_level then
+                LocalPlayer:SetAttribute("Level", getgenv()._ascida_spoof_level)
+            end
+        end)
+        getgenv()._ascida_spoof_level = CONFIG.Level
+    end
+    
+    if not getgenv()._ascida_ws_conn and CONFIG.WinStreak then
+        getgenv()._ascida_ws_conn = LocalPlayer:GetAttributeChangedSignal("StatisticDuelsWinStreak"):Connect(function()
+            if nameSpoofActive and getgenv()._ascida_spoof_ws then
+                LocalPlayer:SetAttribute("StatisticDuelsWinStreak", getgenv()._ascida_spoof_ws)
+            end
+        end)
+        getgenv()._ascida_spoof_ws = CONFIG.WinStreak
+    end
+end
+
+-- ════════════════════════════════════════════════════════
+-- AVATAR SPOOFING - ONLY YOUR HEADSHOT CHANGES
+-- ════════════════════════════════════════════════════════
+
+local avatarEnabled = false
+local targetUserId = nil
+local decodedData = nil
+local showAvatarOnProfile = false
+local myUserId = LocalPlayer.UserId  -- Store your real UserId
+
+-- Function to get headshot URL
+local function getHeadshotUrl(userId)
+    return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
+end
+
+-- Function to spoof UserId (so game thinks you're the other user)
+local function spoofUserId()
+    local meta = getrawmetatable(game)
+    local oldIndex = meta.__index
+    
+    setreadonly(meta, false)
+    
+    meta.__index = newcclosure(function(self, key)
+        if not checkcaller() then
+            if self == LocalPlayer and key == "UserId" and targetUserId then
+                return targetUserId
+            end
+        end
+        return oldIndex(self, key)
+    end)
+    
+    setreadonly(meta, true)
+end
+
+-- Function to replace ONLY YOUR headshot with the spoofed one
+local function replaceMyHeadshot()
+    if not targetUserId then return end
+    
+    local HeadshotURL = getHeadshotUrl(targetUserId)
+    local myIdString = tostring(myUserId)
+    
+    -- Scan PlayerGui and CoreGui for images containing YOUR userId
+    local guisToScan = {
+        LocalPlayer:FindFirstChild("PlayerGui"),
+        game:GetService("CoreGui")
+    }
+    
+    for _, gui in ipairs(guisToScan) do
+        if gui then
+            pcall(function()
+                for _, v in pairs(gui:GetDescendants()) do
+                    if v:IsA("ImageLabel") or v:IsA("ImageButton") then
+                        local image = v.Image
+                        if image and type(image) == "string" then
+                            -- ONLY replace if it contains YOUR userId
+                            if image:find(myIdString) then
+                                v.Image = HeadshotURL
+                            end
+                        end
+                    end
+                end
+            end)
         end
     end
 end
 
--- Monitor for new UI elements so they don't revert
+-- Monitor for new UI elements (only replace YOUR headshots)
 local function setupHeadshotMonitor()
-    game.DescendantAdded:Connect(function(v)
-        if (v:IsA("ImageLabel") or v:IsA("ImageButton")) and targetUserId then
-            -- Small delay to let game set the initial image
-            task.delay(0.1, function()
-                if isYourHeadshot(v.Image) then
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if playerGui then
+        playerGui.DescendantAdded:Connect(function(v)
+            if v:IsA("ImageLabel") or v:IsA("ImageButton") then
+                task.wait()
+                if targetUserId then
+                    local image = v.Image
+                    if image and type(image) == "string" and image:find(tostring(myUserId)) then
+                        v.Image = getHeadshotUrl(targetUserId)
+                    end
+                end
+            end
+        end)
+    end
+    
+    local coreGui = game:GetService("CoreGui")
+    coreGui.DescendantAdded:Connect(function(v)
+        if v:IsA("ImageLabel") or v:IsA("ImageButton") then
+            task.wait()
+            if targetUserId then
+                local image = v.Image
+                if image and type(image) == "string" and image:find(tostring(myUserId)) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
-            end)
+            end
         end
     end)
 end
 
--- ════════════════════════════════════════════════════════
--- AVATAR LOAD LOGIC
--- ════════════════════════════════════════════════════════
-
 local function applyAvatar()
+    if not avatarEnabled or not decodedData then return end
     task.spawn(function()
         pcall(function()
-            local char = LocalPlayer.Character
-            if not char then return end
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            local plr = LocalPlayer
+            if not plr or not plr.Character then return end
+            local humanoid = plr.Character:FindFirstChild("Humanoid")
             if not humanoid then return end
-
-            local appearance = Players:GetCharacterAppearanceAsync(targetUserId)
-            for _, v in pairs(char:GetChildren()) do
+            
+            plr.CharacterAppearanceId = decodedData.id
+            
+            local appearance
+            local ok = pcall(function() appearance = Players:GetCharacterAppearanceAsync(decodedData.id) end)
+            if not ok or not appearance then return end
+            
+            for _, v in pairs(plr.Character:GetChildren()) do
                 if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
-                    v:Destroy()
+                    pcall(function() v:Destroy() end)
                 end
             end
+            
             for _, v in pairs(appearance:GetChildren()) do
                 if v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
-                    v.Parent = char
+                    pcall(function() v.Parent = plr.Character end)
                 elseif v:IsA("Accessory") then
-                    humanoid:AddAccessory(v)
+                    pcall(function() humanoid:AddAccessory(v) end)
                 end
             end
-            replaceMyHeadshots()
+            
+            local head = plr.Character:WaitForChild("Head", 3)
+            if head then
+                if appearance:FindFirstChild("face") then
+                    pcall(function()
+                        local f = head:FindFirstChild("face"); if f then f:Destroy() end
+                        appearance.face.Parent = head
+                    end)
+                else
+                    pcall(function()
+                        local f = head:FindFirstChild("face"); if f then f:Destroy() end
+                        local face = Instance.new("Decal")
+                        face.Face, face.Name = "Front", "face"
+                        face.Texture, face.Transparency, face.Parent = "rbxasset://textures/face.png", 0, head
+                    end)
+                end
+            end
+            
+            local parent = plr.Character.Parent
+            plr.Character.Parent = nil; plr.Character.Parent = parent
+            
+            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
+            
+            if not showAvatarOnProfile then
+                task.wait(0.3)
+                local currentHead = plr.Character:FindFirstChild("Head")
+                if currentHead then
+                    currentHead.Transparency = 1
+                    if currentHead:FindFirstChild("face") then currentHead.face.Transparency = 1 end
+                end
+            end
         end)
     end)
 end
 
 local function setupAvatar()
+    if not CONFIG.AvatarUser or CONFIG.AvatarUser == "" then return end
+    
     task.spawn(function()
-        local success, uid = pcall(function() return Players:GetUserIdFromNameAsync(CONFIG.AvatarUser) end)
-        if success and uid then
-            targetUserId = uid
-            LocalPlayer.CharacterAppearanceId = uid
-            setupHeadshotMonitor()
-            applyAvatar()
+        local uid
+        local ok = pcall(function() uid = Players:GetUserIdFromNameAsync(CONFIG.AvatarUser) end)
+        if not ok or not uid or uid <= 0 then
+            avatarEnabled, targetUserId, decodedData = false, nil, nil
+            return
         end
+        
+        local ok2, result = pcall(function() 
+            return HttpService:JSONDecode(game:HttpGet("https://users.roblox.com/v1/users/" .. tostring(uid), true)) 
+        end)
+        
+        if ok2 and result and result.id then
+            decodedData = result
+            targetUserId = uid
+            avatarEnabled = true
+            LocalPlayer.CharacterAppearanceId = decodedData.id
+            
+            spoofUserId()
+            setupHeadshotMonitor()
+            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
+            
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                applyAvatar()
+            else
+                local char = LocalPlayer.CharacterAdded:Wait()
+                char:WaitForChild("Humanoid", 5)
+                applyAvatar()
+            end
+        else
+            avatarEnabled, targetUserId, decodedData = false, nil, nil
+        end
+    end)
+end
+-- ════════════════════════════════════════════════════════
+-- CHARACTER RESPAWN HANDLING
+-- ════════════════════════════════════════════════════════
+
+local function waitForCharacterReady(char)
+    char:WaitForChild("Humanoid", 10)
+    char:WaitForChild("HumanoidRootPart", 10)
+    char:WaitForChild("Head", 10)
+    task.wait(0.5)
+end
+
+local function setupDeathWatcher()
+    if LocalPlayer.Character then
+        local h = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if h then
+            h.Died:Connect(function()
+                if not avatarEnabled then return end
+                local nc = LocalPlayer.CharacterAdded:Wait()
+                waitForCharacterReady(nc)
+                if avatarEnabled then 
+                    applyAvatar()
+                end
+            end)
+        end
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    waitForCharacterReady(char)
+    setupDeathWatcher()
+    updateHumanoidDisplayName()
+    if avatarEnabled then 
+        applyAvatar()
+    end
+    task.spawn(function() task.wait() updateNametag() end)
+end)
+
+if LocalPlayer.Character then
+    task.spawn(function()
+        waitForCharacterReady(LocalPlayer.Character)
+        setupDeathWatcher()
     end)
 end
 
 -- ════════════════════════════════════════════════════════
--- INITIALIZATION
+-- REQUEST PROFILE HOOK
 -- ════════════════════════════════════════════════════════
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    updateStats()
-    applyAvatar()
-    updateNametag()
-end)
+if not getgenv().ascida_profile then
+    getgenv().ascida_profile = {
+        level = CONFIG.Level,
+        elo = CONFIG.ELO,
+        rankedWins = rankedWins,
+        casualWins = casualWins,
+        rankedWinPct = rankedWinRate,
+        casualWinPct = casualWinRate,
+        weapons = favoriteWeapons,
+    }
+end
 
 task.spawn(function()
-    if not game:IsLoaded() then game.Loaded:Wait() end
-    task.wait(2) -- Wait for game to settle
-    updateStats()
-    setupAvatar()
-    updateNametag()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "InvokeServer" and self.Name == "RequestProfile" then
+            local result = oldNamecall(self, ...)
+            local p = getgenv().ascida_profile
+            if type(result) == "table" and p then
+                result.Level = p.level
+                result.RankedCurrentELO = p.elo
+                result.RankedWins = p.rankedWins
+                result.CasualWins = p.casualWins
+                result.RankedWinPercent = p.rankedWinPct
+                result.CasualWinPercent = p.casualWinPct
+                result.FavoriteWeapons = p.weapons
+            end
+            return result
+        end
+        return oldNamecall(self, ...)
+    end))
 end)
 
--- Profile Request Hook
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    if method == "InvokeServer" and self.Name == "RequestProfile" then
-        local result = oldNamecall(self, ...)
-        if type(result) == "table" then
-            result.Level = CONFIG.Level
-            result.RankedCurrentELO = CONFIG.ELO
-            result.RankedWins = rankedWins
-            result.CasualWins = casualWins
-            result.FavoriteWeapons = favoriteWeapons
-        end
-        return result
-    end
-    return oldNamecall(self, ...)
-end))
+-- ════════════════════════════════════════════════════════
+-- INITIALIZATION (NO REFRESH LOOP - NO LAG)
+-- ════════════════════════════════════════════════════════
 
-print("[Spoofer] Optimized Load Complete.")
+task.spawn(function()
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
+    end
+    task.wait(4)
+    
+    updateStats()
+    setupAvatar()
+    setupHeadshotMonitor()
+
+    if LocalPlayer.Character then
+        updateHumanoidDisplayName()
+        task.wait(5)
+        updateNametag()
+    end
+end)
