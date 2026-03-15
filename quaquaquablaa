@@ -2253,7 +2253,7 @@ local function getHeadshotUrl(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
 end
 
--- Function to spoof UserId (only runs once)
+-- Function to spoof UserId
 local function spoofUserId()
     local meta = getrawmetatable(game)
     local oldIndex = meta.__index
@@ -2272,61 +2272,31 @@ local function spoofUserId()
     setreadonly(meta, true)
 end
 
--- Function to replace headshots (runs only when needed)
+-- Function to replace headshots
 local function replaceHeadshots()
     if not targetUserId then return end
     
     local HeadshotURL = getHeadshotUrl(targetUserId)
     local oldIdPattern = tostring(LocalPlayer.UserId)
     
-    -- Only scan PlayerGui and CoreGui, not the entire game
-    local guisToScan = {
-        LocalPlayer:FindFirstChild("PlayerGui"),
-        game:GetService("CoreGui")
-    }
-    
-    for _, gui in ipairs(guisToScan) do
-        if gui then
-            pcall(function()
-                for _, v in pairs(gui:GetDescendants()) do
-                    if v:IsA("ImageLabel") or v:IsA("ImageButton") then
-                        local image = v.Image
-                        if image and type(image) == "string" and image:find(oldIdPattern) then
-                            v.Image = HeadshotURL
-                        end
-                    end
-                end
-            end)
+    for _, v in pairs(game:GetDescendants()) do
+        if v:IsA("ImageLabel") or v:IsA("ImageButton") then
+            local image = v.Image
+            if image and type(image) == "string" and (image:find(oldIdPattern) or image:find("AvatarHeadShot") or image:find("headshot")) then
+                v.Image = HeadshotURL
+            end
         end
     end
 end
 
--- Monitor for new UI elements (only in relevant GUIs)
+-- Monitor for new UI elements
 local function setupHeadshotMonitor()
-    -- Monitor PlayerGui
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        playerGui.DescendantAdded:Connect(function(v)
-            if v:IsA("ImageLabel") or v:IsA("ImageButton") then
-                task.wait()
-                if targetUserId then
-                    local image = v.Image
-                    if image and type(image) == "string" and image:find(tostring(LocalPlayer.UserId)) then
-                        v.Image = getHeadshotUrl(targetUserId)
-                    end
-                end
-            end
-        end)
-    end
-    
-    -- Monitor CoreGui
-    local coreGui = game:GetService("CoreGui")
-    coreGui.DescendantAdded:Connect(function(v)
+    game.DescendantAdded:Connect(function(v)
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             task.wait()
             if targetUserId then
                 local image = v.Image
-                if image and type(image) == "string" and image:find(tostring(LocalPlayer.UserId)) then
+                if image and type(image) == "string" and (image:find(tostring(LocalPlayer.UserId)) or image:find("AvatarHeadShot") or image:find("headshot")) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
             end
@@ -2389,11 +2359,11 @@ local function applyAvatar()
             local parent = plr.Character.Parent
             plr.Character.Parent = nil; plr.Character.Parent = parent
             
-            -- Replace headshots once
+            -- Replace headshots
             replaceHeadshots()
             
             if not showAvatarOnProfile then
-                task.wait(0.3)
+                task.wait(0.7)
                 local currentHead = plr.Character:FindFirstChild("Head")
                 if currentHead then
                     currentHead.Transparency = 1
@@ -2429,10 +2399,10 @@ local function setupAvatar()
             -- Spoof UserId
             spoofUserId()
             
-            -- Setup headshot monitor (only for new UI elements)
+            -- Setup headshot monitor
             setupHeadshotMonitor()
             
-            -- Replace existing headshots once
+            -- Replace existing headshots
             replaceHeadshots()
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
@@ -2447,6 +2417,7 @@ local function setupAvatar()
         end
     end)
 end
+
 -- ════════════════════════════════════════════════════════
 -- CHARACTER RESPAWN HANDLING
 -- ════════════════════════════════════════════════════════
@@ -2554,15 +2525,15 @@ task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(0.5)
+    task.wait(5)
     
-    -- Apply all spoofs
+
     updateStats()
     setupAvatar()
     
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(0.5)
+        task.wait(20)
         updateNametag()
     end
 end)
@@ -2571,7 +2542,7 @@ end)
 if CONFIG.AutoRefresh then
     task.spawn(function()
         while true do
-            task.wait(5)
+            task.wait(20)
             pcall(refreshAll)
         end
     end)
