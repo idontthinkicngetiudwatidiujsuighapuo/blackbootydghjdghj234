@@ -1,62 +1,13 @@
-frameCount = 0
-skipFrames = 2
-
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
-task.wait(3.5)
-local hooked = {}
+task.wait(3)
 
-for _, obj in getgc() do
-	if typeof(obj) == "function" and not hooked[obj] then
-		local success, info = pcall(function()
-		return debug.info(obj, "s")
-	end)
-
-	if success and info then
-		local isAntiCheat = false
-
-		-- Anti-cheat patterns ONLY
-		if string.find(info, "localscript3") then
-			isAntiCheat = true
-		elseif string.find(info, "AnalitycsPipelineController") then
-			isAntiCheat = true
-		elseif string.find(info, "AntiCheat") then
-			isAntiCheat = true
-		elseif string.find(info, "AC_") then
-			isAntiCheat = true
-		elseif string.find(info, "KickDetector") then
-			isAntiCheat = true
-		elseif string.find(info, "BanHandler") then
-			isAntiCheat = true
-		end
-
-		-- Hook ONLY anti-cheat functions
-		if isAntiCheat then
-			hooked[obj] = true
-
-			if string.find(info, "AnalitycsPipelineController") then
-				hookfunction(obj, function()
-				return task.wait(9000000000)
-			end)
-		else
-			hookfunction(obj, function()
-			return task.wait(9000001331 - 1843)
-		end)
-	end
-
-	print("Hooked anti-cheat:", info)
-end
-end
-end
-end
-
-
-task.wait(0.4)
-
+frameCount = 0
+skipFrames = 2
+task.wait(0.2)
 getgenv().gg_scripters = nil
 getgenv().zoom_scripters = nil
-
 
 local Flags = {
 ["Aimbot Enable"] = false,
@@ -107,8 +58,33 @@ if ok3 and decoded then
 	end
 end
 end
-loadFlags()
--- [[ NVHub | v42.0 Dynamic Dropdowns ]]
+
+local function smoothLoad()
+    task.spawn(function()
+        -- Use a tiny delay before starting to let the game stabilize
+        task.wait(0.5)
+        
+        local success, err = pcall(function()
+            if typeof(loadFlags) == "function" then
+                -- Force the thread to a low priority so it doesn't hang the UI
+                debug.setconstant(loadFlags, 1, debug.getconstant(loadFlags, 1)) 
+                
+                -- Execute
+                return loadFlags()
+            end
+        end)
+        
+        if not success then
+            -- If it fails, wait 3 seconds and try one last time slowly
+            task.wait(3)
+            pcall(loadFlags)
+        end
+    end)
+end
+
+smoothLoad()
+
+
 local SHOW_SPEED = 0.8
 local HIDE_SPEED = 0.95
 
@@ -639,7 +615,7 @@ end
 end)
 
 -- [[ Main Logic Loop ]]
-RunService.Heartbeat:Connect(function()
+RunService.RenderStepped:Connect(function()
 -- Frame skipping to prevent freeze
 frameCount = frameCount + 1
 if frameCount % (skipFrames + 1) ~= 0 then return end
@@ -1022,7 +998,7 @@ getgenv().zoom_scripters = "ItsNVfr"
 task.spawn(function()
 local Lighting = game:GetService("Lighting")
 
-while task.wait(0.2) do
+while task.wait(0.1) do
 	-- Find existing Atmosphere
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 
@@ -1112,7 +1088,7 @@ while task.wait(0.5) do
 				count = count + 1
 				if count >= batch then
 					count = 0
-					task.wait(1)
+					task.wait()
 				end
 			end
 		end)
@@ -1940,7 +1916,7 @@ end
 
 Players.PlayerRemoving:Connect(destroySkeleton)
 
-RunService.Heartbeat:Connect(function()
+RunService.RenderStepped:Connect(function()
 -- Frame skipping to prevent freeze
 frameCount = frameCount + 1
 if frameCount % (skipFrames + 1) ~= 0 then return end
@@ -2054,3 +2030,429 @@ end)
 end
 
 CreateMobileButton()
+
+task.wait(6)
+-- ════════════════════════════════════════════════════════
+-- CONFIGURATION VIA GETGENV
+-- Set these before loading the script:
+-- 
+-- getgenv().display = "xorf"
+-- getgenv().user = "xorf"
+-- getgenv().ava = "xorf"
+-- getgenv().streak = 1000
+-- getgenv().level = 100
+-- getgenv().status = "Contraband"
+-- getgenv().premium = true
+-- getgenv().verify = true
+-- getgenv().favweapon1 = "Assault Rifle"
+-- getgenv().favweapon2 = "Exogun"
+-- getgenv().favweapon3 = "War Horn"
+-- getgenv().favweapon4 = "Fists"
+-- getgenv().casualwins = 1
+-- getgenv().rankedwins = 1
+-- getgenv().casualwinrate = 1
+-- getgenv().rankedwinrate = 1
+-- ════════════════════════════════════════════════════════
+
+-- Default values if getgenv variables aren't set
+local CONFIG = {
+    -- Username & Display Name
+    Username = getgenv().user or getgenv().display or "Xorfee",
+    DisplayName = getgenv().display or getgenv().user or "xorf",
+    
+    -- Avatar
+    AvatarUser = getgenv().ava or "nosniy",
+    
+    -- Stats
+    Level = getgenv().level or 999,
+    WinStreak = getgenv().streak or 6777,
+    ELO = 2895,  -- Kept default since not in your list
+    
+    -- Player Status
+    PlayerStatus = getgenv().status or "Contraband",
+    
+    -- Premium/Verified Badge Spoof
+    PremiumSpoof = getgenv().premium ~= nil and getgenv().premium or true,
+    VerifiedSpoof = getgenv().verify ~= nil and getgenv().verify or true,
+    
+    -- Auto-refresh
+    AutoRefresh = true,
+}
+
+-- Favorite weapons from getgenv
+local favoriteWeapons = {
+    {Name = getgenv().favweapon1 or "Assault Rifle"},
+    {Name = getgenv().favweapon2 or "Exogun"},
+    {Name = getgenv().favweapon3 or "War Horn"},
+    {Name = getgenv().favweapon4 or "Fists"},
+}
+
+-- Win counts from getgenv
+local casualWins = getgenv().casualwins or 37894
+local rankedWins = getgenv().rankedwins or 1596
+local casualWinRate = getgenv().casualwinrate or 1.0
+local rankedWinRate = getgenv().rankedwinrate or 1.0
+
+-- ════════════════════════════════════════════════════════
+-- DON'T EDIT BELOW THIS LINE
+-- ════════════════════════════════════════════════════════
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Utility functions
+local hookmetamethod = hookmetamethod or function(...) return ... end
+local newcclosure = newcclosure or function(f) return f end
+local setreadonly = setreadonly or function() end
+local getrawmetatable = getrawmetatable or function() return {} end
+local clonefunction = clonefunction or function(f) return f end
+local getnamecallmethod = getnamecallmethod or function() return "" end
+local checkcaller = checkcaller or function() return false end
+
+-- ════════════════════════════════════════════════════════
+-- PREMIUM/VERIFIED BADGE SPOOF
+-- ════════════════════════════════════════════════════════
+
+getgenv().spoofPremium = CONFIG.PremiumSpoof
+getgenv().spoofVerified = CONFIG.VerifiedSpoof
+
+local originalIndex
+originalIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+    if self == LocalPlayer then
+        if key == "MembershipType" and getgenv().spoofPremium then
+            return Enum.MembershipType.Premium
+        end
+        if key == "HasVerifiedBadge" and getgenv().spoofVerified then
+            return true
+        end
+        if key == "Name" and getgenv().ascida_spoofUsername then
+            return getgenv().ascida_spoofUsername
+        end
+        if key == "DisplayName" and getgenv().ascida_spoofDisplayName then
+            return getgenv().ascida_spoofDisplayName
+        end
+    end
+    return originalIndex(self, key)
+end))
+
+-- ════════════════════════════════════════════════════════
+-- NAME SPOOFING
+-- ════════════════════════════════════════════════════════
+
+local nameSpoofActive = true
+getgenv().ascida_spoofUsername = CONFIG.Username
+getgenv().ascida_spoofDisplayName = CONFIG.DisplayName
+
+local function updateNametag()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local nametag = hrp:FindFirstChild("Nametag")
+    if not nametag then return end
+    
+    local frame = nametag:FindFirstChild("Frame")
+    if not frame then return end
+    
+    local playerLabel = frame:FindFirstChild("Player")
+    if playerLabel and getgenv().ascida_spoofDisplayName then
+        playerLabel.Text = getgenv().ascida_spoofDisplayName
+    end
+    
+    local usernameLabel = playerLabel and playerLabel:FindFirstChild("Username")
+    if usernameLabel and getgenv().ascida_spoofUsername then
+        usernameLabel.Text = "@" .. getgenv().ascida_spoofUsername
+    end
+end
+
+local function updateHumanoidDisplayName()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid and getgenv().ascida_spoofDisplayName then
+        pcall(function()
+            humanoid.DisplayName = getgenv().ascida_spoofDisplayName
+        end)
+    end
+end
+
+-- ════════════════════════════════════════════════════════
+-- STATS SPOOFING
+-- ════════════════════════════════════════════════════════
+
+local function updateStats()
+    if CONFIG.Level then
+        LocalPlayer:SetAttribute("Level", CONFIG.Level)
+    end
+    if CONFIG.WinStreak then
+        LocalPlayer:SetAttribute("StatisticDuelsWinStreak", CONFIG.WinStreak)
+    end
+    if CONFIG.ELO then
+        LocalPlayer:SetAttribute("DisplayELO", CONFIG.ELO)
+    end
+    if CONFIG.PlayerStatus then
+        LocalPlayer:SetAttribute("PlayerStatus", CONFIG.PlayerStatus)
+    end
+    
+    pcall(function()
+        local ls = LocalPlayer:FindFirstChild("CustomLeaderstats")
+        if ls then
+            if CONFIG.Level then
+                local levelVal = ls:FindFirstChild("Level")
+                if levelVal then levelVal.Value = CONFIG.Level end
+            end
+            if CONFIG.WinStreak then
+                local wsVal = ls:FindFirstChild("Win Streak")
+                if wsVal then wsVal.Value = CONFIG.WinStreak end
+            end
+            if CONFIG.ELO then
+                local eloVal = ls:FindFirstChild("Current ELO")
+                if eloVal then eloVal.Value = CONFIG.ELO end
+            end
+        end
+    end)
+    
+    if not getgenv()._ascida_level_conn and CONFIG.Level then
+        getgenv()._ascida_level_conn = LocalPlayer:GetAttributeChangedSignal("Level"):Connect(function()
+            if nameSpoofActive and getgenv()._ascida_spoof_level then
+                LocalPlayer:SetAttribute("Level", getgenv()._ascida_spoof_level)
+            end
+        end)
+        getgenv()._ascida_spoof_level = CONFIG.Level
+    end
+    
+    if not getgenv()._ascida_ws_conn and CONFIG.WinStreak then
+        getgenv()._ascida_ws_conn = LocalPlayer:GetAttributeChangedSignal("StatisticDuelsWinStreak"):Connect(function()
+            if nameSpoofActive and getgenv()._ascida_spoof_ws then
+                LocalPlayer:SetAttribute("StatisticDuelsWinStreak", getgenv()._ascida_spoof_ws)
+            end
+        end)
+        getgenv()._ascida_spoof_ws = CONFIG.WinStreak
+    end
+end
+
+-- ════════════════════════════════════════════════════════
+-- AVATAR SPOOFING
+-- ════════════════════════════════════════════════════════
+
+local avatarEnabled = false
+local targetUserId = nil
+local decodedData = nil
+local showAvatarOnProfile = false
+
+local function applyAvatar()
+    if not avatarEnabled or not decodedData then return end
+    task.spawn(function()
+        pcall(function()
+            local plr = LocalPlayer
+            if not plr or not plr.Character then return end
+            local humanoid = plr.Character:FindFirstChild("Humanoid")
+            if not humanoid then return end
+            plr.CharacterAppearanceId = decodedData.id
+            pcall(function()
+                plr.Character.Name = decodedData.name
+                humanoid.DisplayName = decodedData.displayName or decodedData.name
+            end)
+            local appearance
+            local ok = pcall(function() appearance = Players:GetCharacterAppearanceAsync(decodedData.id) end)
+            if not ok or not appearance then return end
+            for _, v in pairs(plr.Character:GetChildren()) do
+                if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
+                    pcall(function() v:Destroy() end)
+                end
+            end
+            for _, v in pairs(appearance:GetChildren()) do
+                if v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
+                    pcall(function() v.Parent = plr.Character end)
+                elseif v:IsA("Accessory") then
+                    pcall(function() humanoid:AddAccessory(v) end)
+                end
+            end
+            local head = plr.Character:WaitForChild("Head", 3)
+            if head then
+                if appearance:FindFirstChild("face") then
+                    pcall(function()
+                        local f = head:FindFirstChild("face"); if f then f:Destroy() end
+                        appearance.face.Parent = head
+                    end)
+                else
+                    pcall(function()
+                        local f = head:FindFirstChild("face"); if f then f:Destroy() end
+                        local face = Instance.new("Decal")
+                        face.Face, face.Name = "Front", "face"
+                        face.Texture, face.Transparency, face.Parent = "rbxasset://textures/face.png", 0, head
+                    end)
+                end
+            end
+            local parent = plr.Character.Parent
+            plr.Character.Parent = nil; plr.Character.Parent = parent
+            if not showAvatarOnProfile then
+                task.wait(0.3)
+                local currentHead = plr.Character:FindFirstChild("Head")
+                if currentHead then
+                    currentHead.Transparency = 1
+                    if currentHead:FindFirstChild("face") then currentHead.face.Transparency = 1 end
+                end
+            end
+        end)
+    end)
+end
+
+local function setupAvatar()
+    if not CONFIG.AvatarUser or CONFIG.AvatarUser == "" then return end
+    
+    task.spawn(function()
+        local uid
+        local ok = pcall(function() uid = Players:GetUserIdFromNameAsync(CONFIG.AvatarUser) end)
+        if not ok or not uid or uid <= 0 then
+            avatarEnabled, targetUserId, decodedData = false, nil, nil
+            return
+        end
+        local ok2, result = pcall(function() 
+            return HttpService:JSONDecode(game:HttpGet("https://users.roblox.com/v1/users/" .. tostring(uid), true)) 
+        end)
+        if ok2 and result and result.id then
+            decodedData = result
+            targetUserId = uid
+            avatarEnabled = true
+            LocalPlayer.CharacterAppearanceId = decodedData.id
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                applyAvatar()
+            else
+                local char = LocalPlayer.CharacterAdded:Wait()
+                char:WaitForChild("Humanoid", 5)
+                applyAvatar()
+            end
+        else
+            avatarEnabled, targetUserId, decodedData = false, nil, nil
+        end
+    end)
+end
+
+-- ════════════════════════════════════════════════════════
+-- CHARACTER RESPAWN HANDLING
+-- ════════════════════════════════════════════════════════
+
+local function waitForCharacterReady(char)
+    char:WaitForChild("Humanoid", 10)
+    char:WaitForChild("HumanoidRootPart", 10)
+    char:WaitForChild("Head", 10)
+    task.wait(0.5)
+end
+
+local function setupDeathWatcher()
+    if LocalPlayer.Character then
+        local h = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if h then
+            h.Died:Connect(function()
+                if not avatarEnabled then return end
+                local nc = LocalPlayer.CharacterAdded:Wait()
+                waitForCharacterReady(nc)
+                if avatarEnabled then applyAvatar() end
+            end)
+        end
+    end
+end
+
+-- Single CharacterAdded connection
+LocalPlayer.CharacterAdded:Connect(function(char)
+    waitForCharacterReady(char)
+    setupDeathWatcher()
+    updateHumanoidDisplayName()
+    if avatarEnabled then applyAvatar() end
+    task.spawn(function() task.wait() updateNametag() end)
+end)
+
+if LocalPlayer.Character then
+    task.spawn(function()
+        waitForCharacterReady(LocalPlayer.Character)
+        setupDeathWatcher()
+    end)
+end
+
+-- ════════════════════════════════════════════════════════
+-- REQUEST PROFILE HOOK
+-- ════════════════════════════════════════════════════════
+
+if not getgenv().ascida_profile then
+    getgenv().ascida_profile = {
+        level = CONFIG.Level,
+        elo = CONFIG.ELO,
+        rankedWins = rankedWins,
+        casualWins = casualWins,
+        rankedWinPct = rankedWinRate,
+        casualWinPct = casualWinRate,
+        weapons = favoriteWeapons,
+    }
+end
+
+task.spawn(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        if method == "InvokeServer" and self.Name == "RequestProfile" then
+            local result = oldNamecall(self, ...)
+            local p = getgenv().ascida_profile
+            if type(result) == "table" and p then
+                result.Level = p.level
+                result.RankedCurrentELO = p.elo
+                result.RankedWins = p.rankedWins
+                result.CasualWins = p.casualWins
+                result.RankedWinPercent = p.rankedWinPct
+                result.CasualWinPercent = p.casualWinPct
+                result.FavoriteWeapons = p.weapons
+            end
+            return result
+        end
+        return oldNamecall(self, ...)
+    end))
+end)
+
+-- ════════════════════════════════════════════════════════
+-- AUTO-REFRESH LOOP
+-- ════════════════════════════════════════════════════════
+
+local function refreshAll()
+    updateStats()
+    updateNametag()
+    updateHumanoidDisplayName()
+end
+
+-- ════════════════════════════════════════════════════════
+-- INITIALIZATION
+-- ════════════════════════════════════════════════════════
+
+task.spawn(function()
+    -- Wait for game to load
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
+    end
+    task.wait(0.5)
+    
+    -- Apply all spoofs
+    updateStats()
+    setupAvatar()
+    
+    if LocalPlayer.Character then
+        updateHumanoidDisplayName()
+        task.wait(0.5)
+        updateNametag()
+    end
+end)
+
+-- Auto-refresh loop
+if CONFIG.AutoRefresh then
+    task.spawn(function()
+        while true do
+            task.wait(0.2)
+            pcall(refreshAll)
+        end
+    end)
+end
