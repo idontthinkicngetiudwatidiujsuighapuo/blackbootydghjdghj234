@@ -2538,14 +2538,6 @@ task.spawn(function()
     end
 end)
 
--- Auto-refresh loop
-if CONFIG.AutoRefresh then
-    task.spawn(function()
-        while true do
-            task.wait(5)
-            pcall(refreshAll)
-        end
-    end)
-end
+
 
 print("[Spoofer] Loaded - All spoofs active")
