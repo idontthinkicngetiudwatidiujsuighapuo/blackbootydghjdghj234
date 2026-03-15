@@ -1,3 +1,33 @@
+-- OPTIMIZATION: Kill all existing loops before starting
+if getgenv()._nvhub_loaded then
+    getgenv()._nvhub_cleanup()
+    task.wait(1)
+end
+
+local cleanupFunctions = {}
+local function addCleanup(fn) table.insert(cleanupFunctions, fn) end
+
+getgenv()._nvhub_cleanup = function()
+    for _, fn in ipairs(cleanupFunctions) do
+        pcall(fn)
+    end
+    cleanupFunctions = {}
+end
+
+-- Use this for ALL your loops instead of direct connections
+local function optimizedConnect(event, func)
+    local connection = event:Connect(func)
+    addCleanup(function() connection:Disconnect() end)
+    return connection
+end
+
+-- Use this for all your while loops
+local function optimizedSpawn(func)
+    local thread = task.spawn(func)
+    addCleanup(function() task.cancel(thread) end)
+    return thread
+end
+
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
