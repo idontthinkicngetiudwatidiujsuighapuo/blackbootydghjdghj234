@@ -2066,7 +2066,7 @@ local CONFIG = {
     -- Stats
     Level = getgenv().level or 999,
     WinStreak = getgenv().streak or 6777,
-    ELO = 2895,  -- Kept default since not in your list
+    ELO = 2895,
     
     -- Player Status
     PlayerStatus = getgenv().status or "Contraband",
@@ -2239,8 +2239,9 @@ local function updateStats()
 end
 
 -- ════════════════════════════════════════════════════════
--- AVATAR SPOOFING - IMPROVED VERSION WITH HEADSHOT REPLACEMENT
+-- AVATAR SPOOFING - EVERYONE HAS THE SAME HEADSHOT
 -- ════════════════════════════════════════════════════════
+
 local avatarEnabled = false
 local targetUserId = nil
 local decodedData = nil
@@ -2251,19 +2252,39 @@ local function getHeadshotUrl(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
 end
 
--- Function to replace ALL headshots with the spoofed one (SIMPLIFIED)
+-- Function to spoof UserId
+local function spoofUserId()
+    local meta = getrawmetatable(game)
+    local oldIndex = meta.__index
+    
+    setreadonly(meta, false)
+    
+    meta.__index = newcclosure(function(self, key)
+        if not checkcaller() then
+            if self == LocalPlayer and key == "UserId" and targetUserId then
+                return targetUserId
+            end
+        end
+        return oldIndex(self, key)
+    end)
+    
+    setreadonly(meta, true)
+end
+
+-- Function to replace ALL headshots with the spoofed one (EVERYONE)
 local function replaceAllHeadshots()
     if not targetUserId then return end
     
     local HeadshotURL = getHeadshotUrl(targetUserId)
     
-    -- Scan everything and replace ANY image that looks like a headshot
+    -- Scan EVERYTHING and replace ANY headshot with our spoofed one
+    -- This affects ALL players' headshots, not just yours
     for _, v in pairs(game:GetDescendants()) do
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             local image = v.Image
             if image and type(image) == "string" then
-                -- Just replace any image that contains "thumb" or "headshot"
-                if image:find("thumb") or image:find("headshot") or image:find("Avatar") then
+                -- Check if this image is ANY kind of Roblox thumbnail/headshot
+                if image:find("rbxthumb") or image:find("headshot") or image:find("Avatar") or image:find("thumbnail") then
                     v.Image = HeadshotURL
                 end
             end
@@ -2271,14 +2292,14 @@ local function replaceAllHeadshots()
     end
 end
 
--- Monitor for new UI elements (SIMPLIFIED)
+-- Monitor for new UI elements (affects ALL new headshots)
 local function setupHeadshotMonitor()
     game.DescendantAdded:Connect(function(v)
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             task.wait()
             if targetUserId then
                 local image = v.Image
-                if image and type(image) == "string" and (image:find("thumb") or image:find("headshot") or image:find("Avatar")) then
+                if image and type(image) == "string" and (image:find("rbxthumb") or image:find("headshot") or image:find("Avatar") or image:find("thumbnail")) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
             end
@@ -2295,22 +2316,18 @@ local function applyAvatar()
             local humanoid = plr.Character:FindFirstChild("Humanoid")
             if not humanoid then return end
             
-            -- Update appearance ID
             plr.CharacterAppearanceId = decodedData.id
             
-            -- Get appearance
             local appearance
             local ok = pcall(function() appearance = Players:GetCharacterAppearanceAsync(decodedData.id) end)
             if not ok or not appearance then return end
             
-            -- Clear existing items
             for _, v in pairs(plr.Character:GetChildren()) do
                 if v:IsA("Accessory") or v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
                     pcall(function() v:Destroy() end)
                 end
             end
             
-            -- Apply new appearance
             for _, v in pairs(appearance:GetChildren()) do
                 if v:IsA("Shirt") or v:IsA("Pants") or v:IsA("BodyColors") then
                     pcall(function() v.Parent = plr.Character end)
@@ -2319,7 +2336,6 @@ local function applyAvatar()
                 end
             end
             
-            -- Handle face
             local head = plr.Character:WaitForChild("Head", 3)
             if head then
                 if appearance:FindFirstChild("face") then
@@ -2337,11 +2353,9 @@ local function applyAvatar()
                 end
             end
             
-            -- Force character refresh
             local parent = plr.Character.Parent
             plr.Character.Parent = nil; plr.Character.Parent = parent
             
-            -- Replace ALL headshots with spoofed one
             replaceAllHeadshots()
             
             if not showAvatarOnProfile then
@@ -2375,16 +2389,10 @@ local function setupAvatar()
             decodedData = result
             targetUserId = uid
             avatarEnabled = true
-            spoofedHeadshotUrl = getHeadshotUrl(uid)
             LocalPlayer.CharacterAppearanceId = decodedData.id
             
-            -- Spoof UserId
             spoofUserId()
-            
-            -- Setup headshot monitor
             setupHeadshotMonitor()
-            
-            -- Replace ALL headshots immediately
             replaceAllHeadshots()
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
@@ -2421,21 +2429,18 @@ local function setupDeathWatcher()
                 waitForCharacterReady(nc)
                 if avatarEnabled then 
                     applyAvatar()
-                    replaceHeadshots()
                 end
             end)
         end
     end
 end
 
--- Single CharacterAdded connection
 LocalPlayer.CharacterAdded:Connect(function(char)
     waitForCharacterReady(char)
     setupDeathWatcher()
     updateHumanoidDisplayName()
     if avatarEnabled then 
         applyAvatar()
-        replaceHeadshots()
     end
     task.spawn(function() task.wait() updateNametag() end)
 end)
@@ -2486,30 +2491,15 @@ task.spawn(function()
 end)
 
 -- ════════════════════════════════════════════════════════
--- AUTO-REFRESH LOOP
--- ════════════════════════════════════════════════════════
-
-local function refreshAll()
-    updateStats()
-    updateNametag()
-    updateHumanoidDisplayName()
-    if avatarEnabled then
-        pcall(replaceHeadshots)
-    end
-end
-
--- ════════════════════════════════════════════════════════
--- INITIALIZATION
+-- INITIALIZATION (NO REFRESH LOOP - NO LAG)
 -- ════════════════════════════════════════════════════════
 
 task.spawn(function()
-    -- Wait for game to load
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
     task.wait(4)
     
-
     updateStats()
     setupAvatar()
     setupHeadshotMonitor()
@@ -2521,6 +2511,4 @@ task.spawn(function()
     end
 end)
 
-
-
-print("[Spoofer] Loaded - All spoofs active")
+print("[Spoofer] Loaded - All spoofs active (EVERYONE has same headshot)")
