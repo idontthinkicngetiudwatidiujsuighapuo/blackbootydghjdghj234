@@ -1994,8 +1994,8 @@ local function CreateMobileButton()
 
 	local QC_Btn = Instance.new("TextButton", QC_Gui)
 	QC_Btn.Size = UDim2.new(0, 50, 0, 50)
-	QC_Btn.Position = UDim2.new(0, 15, 0.5, -25)
-	QC_Btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+QC_Btn.Position = UDim2.new(0, 35, 0.5, -25)
+QC_Btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	QC_Btn.BackgroundTransparency = 0.7
 	QC_Btn.Text = "QC"
 	QC_Btn.TextColor3 = Color3.new(1, 1, 1)
