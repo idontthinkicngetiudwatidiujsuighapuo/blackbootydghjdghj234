@@ -2031,7 +2031,7 @@ end
 
 CreateMobileButton()
 
-task.wait(6)
+task.wait(6.5)
 -- ════════════════════════════════════════════════════════
 -- CONFIGURATION VIA GETGENV
 -- Set these before loading the script:
@@ -2525,7 +2525,7 @@ task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(5)
+    task.wait(4)
     
 
     updateStats()
