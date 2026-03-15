@@ -2540,7 +2540,7 @@ end)
 
 
 --- que
-task.wait(100)
+task.wait(15)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
