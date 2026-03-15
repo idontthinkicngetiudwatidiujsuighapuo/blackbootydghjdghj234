@@ -2521,26 +2521,25 @@ end)
 
 local queue_on_teleport = queue_on_teleport or function() end
 
--- Collect settings quickly (limit to only what's needed)
+-- Collect ALL getgenv variables efficiently
 local envVars = {}
+local count = 0
 for k, v in pairs(getgenv()) do
-    if k:match("^[%a_][%w_]*$") and type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
-        envVars[#envVars+1] = ("%s=%s"):format(k, type(v)=="string" and ("%q"):format(v) or tostring(v))
+    count = count + 1
+    if count > 100 then break end -- Safety limit to prevent freezing
+    if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
+        if type(v) == "string" then
+            envVars[#envVars+1] = string.format("getgenv().%s = %q", k, v)
+        else
+            envVars[#envVars+1] = string.format("getgenv().%s = %s", k, tostring(v))
+        end
     end
 end
 
--- Queue with minimal processing
-queue_on_teleport(([[
+queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(5)
-local s={%s}
-for _,v in ipairs(s) do
-    local k,val = v:match("([^=]+)=(.*)")
-    if k then
-        local n = tonumber(val)
-        getgenv()[k] = n or (val:sub(1,1)=='"' and val:sub(2,-2) or val)
-    end
-end
 task.wait(3)
+]] .. table.concat(envVars, "\n") .. [[
+
 loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()
-]]):format(table.concat(envVars,",")))
+]])
