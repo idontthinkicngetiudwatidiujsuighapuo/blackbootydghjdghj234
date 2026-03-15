@@ -2245,57 +2245,40 @@ local avatarEnabled = false
 local targetUserId = nil
 local decodedData = nil
 local showAvatarOnProfile = false
-local spoofedHeadshotUrl = nil
 
 -- Function to get headshot URL
 local function getHeadshotUrl(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
 end
 
--- Function to spoof UserId
-local function spoofUserId()
-    local meta = getrawmetatable(game)
-    local oldIndex = meta.__index
-    
-    setreadonly(meta, false)
-    
-    meta.__index = newcclosure(function(self, key)
-        if not checkcaller() then
-            if self == LocalPlayer and key == "UserId" and targetUserId then
-                return targetUserId
-            end
-        end
-        return oldIndex(self, key)
-    end)
-    
-    setreadonly(meta, true)
-end
-
--- Function to replace ALL headshots with the spoofed one
+-- Function to replace ALL headshots with the spoofed one (SIMPLIFIED)
 local function replaceAllHeadshots()
     if not targetUserId then return end
     
     local HeadshotURL = getHeadshotUrl(targetUserId)
     
-    -- Scan EVERYTHING and replace ANY headshot with our spoofed one
+    -- Scan everything and replace ANY image that looks like a headshot
     for _, v in pairs(game:GetDescendants()) do
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             local image = v.Image
-            if image and type(image) == "string" and (image:find("rbxthumb") or image:find("AvatarHeadShot") or image:find("headshot") or image:find("thumbnail")) then
-                v.Image = HeadshotURL
+            if image and type(image) == "string" then
+                -- Just replace any image that contains "thumb" or "headshot"
+                if image:find("thumb") or image:find("headshot") or image:find("Avatar") then
+                    v.Image = HeadshotURL
+                end
             end
         end
     end
 end
 
--- Monitor for new UI elements
+-- Monitor for new UI elements (SIMPLIFIED)
 local function setupHeadshotMonitor()
     game.DescendantAdded:Connect(function(v)
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             task.wait()
             if targetUserId then
                 local image = v.Image
-                if image and type(image) == "string" and (image:find("rbxthumb") or image:find("AvatarHeadShot") or image:find("headshot") or image:find("thumbnail")) then
+                if image and type(image) == "string" and (image:find("thumb") or image:find("headshot") or image:find("Avatar")) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
             end
@@ -2528,6 +2511,7 @@ task.spawn(function()
     
 
     updateStats()
+setupHeadshotMonitor()
     setupAvatar()
     
     if LocalPlayer.Character then
