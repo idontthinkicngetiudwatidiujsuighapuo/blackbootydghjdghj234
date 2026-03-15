@@ -2359,7 +2359,7 @@ local function applyAvatar()
             replaceAllHeadshots()
             
             if not showAvatarOnProfile then
-                task.wait(0.3)
+                task.wait(0.4)
                 local currentHead = plr.Character:FindFirstChild("Head")
                 if currentHead then
                     currentHead.Transparency = 1
