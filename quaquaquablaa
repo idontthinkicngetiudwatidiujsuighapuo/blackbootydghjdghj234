@@ -2417,14 +2417,6 @@ local function setupAvatar()
     end)
 end
 
--- Optional: Keep refreshing to ensure all headshots stay the same
-task.spawn(function()
-    while avatarEnabled and targetUserId do
-        task.wait(10) -- Every 10 seconds
-        pcall(replaceAllHeadshots)
-    end
-end)
-
 -- ════════════════════════════════════════════════════════
 -- CHARACTER RESPAWN HANDLING
 -- ════════════════════════════════════════════════════════
