@@ -81,9 +81,9 @@ local function smoothLoad()
         end
     end)
 end
-
+task.wait(0.5)
 smoothLoad()
-
+task.wait(0.5)
 
 local SHOW_SPEED = 0.8
 local HIDE_SPEED = 0.95
