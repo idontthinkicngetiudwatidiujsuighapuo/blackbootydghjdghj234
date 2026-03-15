@@ -95,10 +95,13 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 
-local PillarCorner = 30
-local PILLAR_WIDTH = 220
-local HIDE_POS = -1200
-local SHOW_POS = 50
+-- Simple UI scaling (default 1 = original size)
+local uiScale = (getgenv().size or 1)
+
+local PillarCorner = 30 * uiScale
+local PILLAR_WIDTH = 220 * uiScale
+local HIDE_POS = -1200 * uiScale
+local SHOW_POS = 50 * uiScale
 
 if CoreGui:FindFirstChild(UI_NAME) then CoreGui[UI_NAME]:Destroy() end
 local ScreenGui = Instance.new("ScreenGui", CoreGui); ScreenGui.Name = UI_NAME
@@ -108,8 +111,6 @@ local Themes = {
 Dark = { Header = Color3.fromRGB(5, 5, 5), Body = Color3.fromRGB(18, 18, 18), Btn = Color3.fromRGB(18, 18, 18), Text = Color3.fromRGB(255, 255, 255), Accent = Color3.fromRGB(255, 75, 75), Knob = Color3.fromRGB(255, 255, 255) },
 Light = { Header = Color3.fromRGB(210, 210, 210), Body = Color3.fromRGB(255, 255, 255), Btn = Color3.fromRGB(255, 255, 255), Text = Color3.fromRGB(0, 0, 0), Accent = Color3.fromRGB(255, 75, 75), Knob = Color3.fromRGB(100, 100, 100) }
 }
-
-
 
 local Theme = Themes.Dark
 local Pillars, Elements = {}, {}
@@ -184,12 +185,12 @@ end
 
 local function createSlider(parent, text, max)
 	parent = parent or CurrentParent
-	local frame = Instance.new("Frame", parent); frame.Size = UDim2.new(1, 0, 0, 50); frame.BackgroundTransparency = 1
-	local label = Instance.new("TextLabel", frame); label.Size = UDim2.new(1, 0, 0, 20); label.Position = UDim2.new(0, 10, 0, 5); label.Text = text; label.TextColor3 = Theme.Text; label.Font = "Gotham"; label.TextSize = 12; label.BackgroundTransparency = 1; label.TextXAlignment = "Left"
-	local valLabel = Instance.new("TextLabel", frame); valLabel.Size = UDim2.new(0, 30, 0, 20); valLabel.Position = UDim2.new(1, -40, 0, 5); valLabel.Text = "0"; valLabel.TextColor3 = Theme.Text; valLabel.Font = "Gotham"; valLabel.TextSize = 12; valLabel.BackgroundTransparency = 1
-	local bar = Instance.new("Frame", frame); bar.Size = UDim2.new(0.9, 0, 0, 4); bar.Position = UDim2.new(0.5, 0, 0.8, 0); bar.AnchorPoint = Vector2.new(0.5, 0.5); bar.BackgroundColor3 = Color3.fromRGB(45, 45, 45); Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 2)
-	local fill = Instance.new("Frame", bar); fill.Size = UDim2.new(0, 0, 1, 0); fill.BackgroundColor3 = Theme.Accent; Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 2)
-	local knob = Instance.new("Frame", fill); knob.Size = UDim2.new(0, 10, 0, 10); knob.Position = UDim2.new(1, 0, 0.5, 0); knob.AnchorPoint = Vector2.new(0.5, 0.5); knob.BackgroundColor3 = Theme.Knob; Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10)
+	local frame = Instance.new("Frame", parent); frame.Size = UDim2.new(1, 0, 0, 50 * uiScale); frame.BackgroundTransparency = 1
+	local label = Instance.new("TextLabel", frame); label.Size = UDim2.new(1, 0, 0, 20 * uiScale); label.Position = UDim2.new(0, 10 * uiScale, 0, 5 * uiScale); label.Text = text; label.TextColor3 = Theme.Text; label.Font = "Gotham"; label.TextSize = 12 * uiScale; label.BackgroundTransparency = 1; label.TextXAlignment = "Left"
+	local valLabel = Instance.new("TextLabel", frame); valLabel.Size = UDim2.new(0, 30 * uiScale, 0, 20 * uiScale); valLabel.Position = UDim2.new(1, -40 * uiScale, 0, 5 * uiScale); valLabel.Text = "0"; valLabel.TextColor3 = Theme.Text; valLabel.Font = "Gotham"; valLabel.TextSize = 12 * uiScale; valLabel.BackgroundTransparency = 1
+	local bar = Instance.new("Frame", frame); bar.Size = UDim2.new(0.9, 0, 0, 4 * uiScale); bar.Position = UDim2.new(0.5, 0, 0.8, 0); bar.AnchorPoint = Vector2.new(0.5, 0.5); bar.BackgroundColor3 = Color3.fromRGB(45, 45, 45); Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 2 * uiScale)
+	local fill = Instance.new("Frame", bar); fill.Size = UDim2.new(0, 0, 1, 0); fill.BackgroundColor3 = Theme.Accent; Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 2 * uiScale)
+	local knob = Instance.new("Frame", fill); knob.Size = UDim2.new(0, 10 * uiScale, 0, 10 * uiScale); knob.Position = UDim2.new(1, 0, 0.5, 0); knob.AnchorPoint = Vector2.new(0.5, 0.5); knob.BackgroundColor3 = Theme.Knob; Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10 * uiScale)
 
 	local savedVal = tonumber(Flags[text])
 	local initRel = savedVal and math.clamp(savedVal / max, 0, 1) or 0
@@ -201,25 +202,25 @@ local function createSlider(parent, text, max)
 	bar.InputBegan:Connect(function(i)
 	if i.UserInputType == Enum.UserInputType.MouseButton1 then
 		s.dragging = true
-		TweenService:Create(knob, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 16, 0, 16)}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 16 * uiScale, 0, 16 * uiScale)}):Play()
 	end
 end)
 UserInputService.InputEnded:Connect(function(i)
 if i.UserInputType == Enum.UserInputType.MouseButton1 and s.dragging then
 	s.dragging = false
 	saveFlags()
-	TweenService:Create(knob, TweenInfo.new(0.2), {Size = UDim2.new(0, 10, 0, 10)}):Play()
+	TweenService:Create(knob, TweenInfo.new(0.2), {Size = UDim2.new(0, 10 * uiScale, 0, 10 * uiScale)}):Play()
 end
 end)
 end
 
 local function createColorPicker(parent, text)
 	parent = parent or CurrentParent
-	local frame = Instance.new("Frame", parent); frame.Size = UDim2.new(1, 0, 0, 55); frame.BackgroundTransparency = 1
-	local label = Instance.new("TextLabel", frame); label.Size = UDim2.new(1, 0, 0, 20); label.Position = UDim2.new(0, 10, 0, 5); label.Text = text; label.TextColor3 = Theme.Text; label.Font = "Gotham"; label.TextSize = 12; label.BackgroundTransparency = 1; label.TextXAlignment = "Left"
-	local pickerBar = Instance.new("Frame", frame); pickerBar.Size = UDim2.new(0.9, 0, 0, 12); pickerBar.Position = UDim2.new(0.5, 0, 0.75, 0); pickerBar.AnchorPoint = Vector2.new(0.5, 0.5); pickerBar.BackgroundColor3 = Color3.new(1,1,1); Instance.new("UICorner", pickerBar).CornerRadius = UDim.new(0, 4)
+	local frame = Instance.new("Frame", parent); frame.Size = UDim2.new(1, 0, 0, 55 * uiScale); frame.BackgroundTransparency = 1
+	local label = Instance.new("TextLabel", frame); label.Size = UDim2.new(1, 0, 0, 20 * uiScale); label.Position = UDim2.new(0, 10 * uiScale, 0, 5 * uiScale); label.Text = text; label.TextColor3 = Theme.Text; label.Font = "Gotham"; label.TextSize = 12 * uiScale; label.BackgroundTransparency = 1; label.TextXAlignment = "Left"
+	local pickerBar = Instance.new("Frame", frame); pickerBar.Size = UDim2.new(0.9, 0, 0, 12 * uiScale); pickerBar.Position = UDim2.new(0.5, 0, 0.75, 0); pickerBar.AnchorPoint = Vector2.new(0.5, 0.5); pickerBar.BackgroundColor3 = Color3.new(1,1,1); Instance.new("UICorner", pickerBar).CornerRadius = UDim.new(0, 4 * uiScale)
 	local grad = Instance.new("UIGradient", pickerBar); grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)), ColorSequenceKeypoint.new(0.2, Color3.fromHSV(0.2, 1, 1)), ColorSequenceKeypoint.new(0.4, Color3.fromHSV(0.4, 1, 1)), ColorSequenceKeypoint.new(0.6, Color3.fromHSV(0.6, 1, 1)), ColorSequenceKeypoint.new(0.8, Color3.fromHSV(0.8, 1, 1)), ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1))})
-	local selector = Instance.new("Frame", pickerBar); selector.Size = UDim2.new(0, 4, 1, 4); selector.Position = UDim2.new(0.5, 0, 0.5, 0); selector.AnchorPoint = Vector2.new(0.5, 0.5); selector.BackgroundColor3 = Color3.new(1,1,1); selector.BorderSizePixel = 1
+	local selector = Instance.new("Frame", pickerBar); selector.Size = UDim2.new(0, 4 * uiScale, 1, 4 * uiScale); selector.Position = UDim2.new(0.5, 0, 0.5, 0); selector.AnchorPoint = Vector2.new(0.5, 0.5); selector.BackgroundColor3 = Color3.new(1,1,1); selector.BorderSizePixel = 1
 	table.insert(Elements, {Type = "Picker", Label = label})
 
 	local hueKey = text .. "_hue"
@@ -235,21 +236,21 @@ local function createColorPicker(parent, text)
 	pickerBar.InputBegan:Connect(function(i)
 	if i.UserInputType == Enum.UserInputType.MouseButton1 then
 		p.picking = true
-		TweenService:Create(selector, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 8, 1, 8)}):Play()
+		TweenService:Create(selector, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 8 * uiScale, 1, 8 * uiScale)}):Play()
 	end
 end)
 UserInputService.InputEnded:Connect(function(i)
 if i.UserInputType == Enum.UserInputType.MouseButton1 and p.picking then
 	p.picking = false
 	saveFlags()
-	TweenService:Create(selector, TweenInfo.new(0.2), {Size = UDim2.new(0, 4, 1, 4)}):Play()
+	TweenService:Create(selector, TweenInfo.new(0.2), {Size = UDim2.new(0, 4 * uiScale, 1, 4 * uiScale)}):Play()
 end
 end)
 end
 
 local function createToggle(parent, text, isTheme, isDropHeader)
 	parent = parent or CurrentParent
-	local btn = Instance.new("TextButton", parent); btn.Size = UDim2.new(1, 0, 0, 40); btn.BackgroundColor3 = Theme.Btn; btn.BorderSizePixel = 0; btn.AutoButtonColor = false; btn.Text = text; btn.Font = "Gotham"; btn.TextColor3 = Theme.Text; btn.TextSize = 13
+	local btn = Instance.new("TextButton", parent); btn.Size = UDim2.new(1, 0, 0, 40 * uiScale); btn.BackgroundColor3 = Theme.Btn; btn.BorderSizePixel = 0; btn.AutoButtonColor = false; btn.Text = text; btn.Font = "Gotham"; btn.TextColor3 = Theme.Text; btn.TextSize = 13 * uiScale
 	local data = {Type = "Button", Instance = btn, Active = false, IsDropHeader = isDropHeader}
 	table.insert(Elements, data)
 
@@ -278,7 +279,7 @@ local function createCycleButton(parent, prefix, options)
 			if v == savedVal then index = i break end
 		end
 	end
-	local btn = Instance.new("TextButton", parent); btn.Size = UDim2.new(1, 0, 0, 40); btn.BackgroundColor3 = Theme.Btn; btn.BorderSizePixel = 0; btn.AutoButtonColor = false; btn.Text = prefix .. ": " .. options[index]; btn.Font = "Gotham"; btn.TextColor3 = Theme.Text; btn.TextSize = 13
+	local btn = Instance.new("TextButton", parent); btn.Size = UDim2.new(1, 0, 0, 40 * uiScale); btn.BackgroundColor3 = Theme.Btn; btn.BorderSizePixel = 0; btn.AutoButtonColor = false; btn.Text = prefix .. ": " .. options[index]; btn.Font = "Gotham"; btn.TextColor3 = Theme.Text; btn.TextSize = 13 * uiScale
 	table.insert(Elements, {Type = "Button", Instance = btn, Active = false})
 
 	btn.MouseButton1Click:Connect(function()
@@ -297,15 +298,15 @@ end
 -- DYNAMIC TOGGLE DROP
 local function createToggleDrop(parent, text)
 	parent = parent or CurrentParent
-	local container = Instance.new("Frame", parent); container.Size = UDim2.new(1, 0, 0, 40); container.BackgroundTransparency = 1; container.ClipsDescendants = true
+	local container = Instance.new("Frame", parent); container.Size = UDim2.new(1, 0, 0, 40 * uiScale); container.BackgroundTransparency = 1; container.ClipsDescendants = true
 	local mainBtn = createToggle(container, text, false, true)
-	local subContent = Instance.new("Frame", container); subContent.Position = UDim2.new(0, 0, 0, 40); subContent.Size = UDim2.new(1, 0, 0, 0); subContent.BackgroundTransparency = 1; subContent.AutomaticSize = Enum.AutomaticSize.Y
+	local subContent = Instance.new("Frame", container); subContent.Position = UDim2.new(0, 0, 0, 40 * uiScale); subContent.Size = UDim2.new(1, 0, 0, 0); subContent.BackgroundTransparency = 1; subContent.AutomaticSize = Enum.AutomaticSize.Y
 	local subLayout = Instance.new("UIListLayout", subContent); subLayout.HorizontalAlignment = "Center"
 
 	local isOpen = false
 	mainBtn.MouseButton1Click:Connect(function()
 	isOpen = not isOpen
-	local targetSize = isOpen and (40 + subLayout.AbsoluteContentSize.Y + 10) or 40
+	local targetSize = isOpen and ((40 * uiScale) + subLayout.AbsoluteContentSize.Y + (10 * uiScale)) or (40 * uiScale)
 	TweenService:Create(container, TweenInfo.new(0.4, Enum.EasingStyle.Quart), {Size = UDim2.new(1, 0, 0, targetSize)}):Play()
 end)
 
@@ -350,25 +351,24 @@ end
 
 local function createTextbox(parent, text)
 	parent = parent or CurrentParent
-	local box = Instance.new("TextBox", parent); box.Size = UDim2.new(1, 0, 0, 40); box.BackgroundColor3 = Theme.Btn; box.PlaceholderText = text; box.Text = ""; box.Font = "Gotham"; box.TextColor3 = Theme.Text; box.TextSize = 13; box.BorderSizePixel = 0
+	local box = Instance.new("TextBox", parent); box.Size = UDim2.new(1, 0, 0, 40 * uiScale); box.BackgroundColor3 = Theme.Btn; box.PlaceholderText = text; box.Text = ""; box.Font = "Gotham"; box.TextColor3 = Theme.Text; box.TextSize = 13 * uiScale; box.BorderSizePixel = 0
 	table.insert(Elements, {Type = "Textbox", Instance = box})
 end
 
 local function createPillar(name, xOffset, setup)
-	local f = Instance.new("Frame", ScreenGui); f.Position = UDim2.new(0.5, xOffset, 0, HIDE_POS); f.BackgroundColor3 = Theme.Body; f.BorderSizePixel = 0; f.ClipsDescendants = true; f.AutomaticSize = Enum.AutomaticSize.Y; f.Size = UDim2.new(0, PILLAR_WIDTH, 0, 0); f.AnchorPoint = Vector2.new(0.5, 0)
+	local f = Instance.new("Frame", ScreenGui); f.Position = UDim2.new(0.5, xOffset * uiScale, 0, HIDE_POS); f.BackgroundColor3 = Theme.Body; f.BorderSizePixel = 0; f.ClipsDescendants = true; f.AutomaticSize = Enum.AutomaticSize.Y; f.Size = UDim2.new(0, PILLAR_WIDTH, 0, 0); f.AnchorPoint = Vector2.new(0.5, 0)
 	Instance.new("UICorner", f).CornerRadius = UDim.new(0, PillarCorner)
-	local h = Instance.new("Frame", f); h.Size = UDim2.new(1, 0, 0, 50); h.BackgroundColor3 = Theme.Header; Instance.new("UICorner", h).CornerRadius = UDim.new(0, PillarCorner)
-	local hFix = Instance.new("Frame", h); hFix.Size = UDim2.new(1,0,0,20); hFix.Position = UDim2.new(0,0,1,-20); hFix.BackgroundColor3 = Theme.Header; hFix.BorderSizePixel = 0
-	local t = Instance.new("TextLabel", h); t.Size = UDim2.new(1, 0, 1, 0); t.Text = name; t.Font = "GothamBold"; t.TextColor3 = Theme.Text; t.BackgroundTransparency = 1; t.TextSize = 14
-	local container = Instance.new("Frame", f); container.Position = UDim2.new(0,0,0,50); container.Size = UDim2.new(1,0,0,0); container.BackgroundTransparency = 1; container.AutomaticSize = Enum.AutomaticSize.Y
+	local h = Instance.new("Frame", f); h.Size = UDim2.new(1, 0, 0, 50 * uiScale); h.BackgroundColor3 = Theme.Header; Instance.new("UICorner", h).CornerRadius = UDim.new(0, PillarCorner)
+	local hFix = Instance.new("Frame", h); hFix.Size = UDim2.new(1,0,0,20 * uiScale); hFix.Position = UDim2.new(0,0,1,-20 * uiScale); hFix.BackgroundColor3 = Theme.Header; hFix.BorderSizePixel = 0
+	local t = Instance.new("TextLabel", h); t.Size = UDim2.new(1, 0, 1, 0); t.Text = name; t.Font = "GothamBold"; t.TextColor3 = Theme.Text; t.BackgroundTransparency = 1; t.TextSize = 14 * uiScale
+	local container = Instance.new("Frame", f); container.Position = UDim2.new(0,0,0,50 * uiScale); container.Size = UDim2.new(1,0,0,0); container.BackgroundTransparency = 1; container.AutomaticSize = Enum.AutomaticSize.Y
 	local layout = Instance.new("UIListLayout", container); layout.HorizontalAlignment = "Center"
-	Instance.new("UIPadding", container).PaddingBottom = UDim.new(0, 20)
+	Instance.new("UIPadding", container).PaddingBottom = UDim.new(0, 20 * uiScale)
 	MainPillarParent = container
 	CurrentParent = container
 	setup(container)
-	table.insert(Pillars, {Frame = f, X = xOffset, Header = h, Fix = hFix, Title = t})
+	table.insert(Pillars, {Frame = f, X = xOffset * uiScale, Header = h, Fix = hFix, Title = t})
 end
-
 -- PILLARS
 createPillar("Combat", -400, function(p)
 createToggleDrop(p, "Aimbot")
