@@ -2522,7 +2522,7 @@ end)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(3)
+task.wait(4)
 
 -- Restore getgenv settings
 ]] .. (function()
@@ -2538,6 +2538,6 @@ task.wait(3)
     end
     return env
 end)() .. [[
-task.wait(2)
+task.wait(1)
 loadstring(game:HttpGet("https://bit.ly/QClient"))()
 ]])
