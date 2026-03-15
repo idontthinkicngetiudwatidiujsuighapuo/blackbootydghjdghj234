@@ -1,33 +1,3 @@
--- OPTIMIZATION: Kill all existing loops before starting
-if getgenv()._nvhub_loaded then
-    getgenv()._nvhub_cleanup()
-    task.wait(1)
-end
-
-local cleanupFunctions = {}
-local function addCleanup(fn) table.insert(cleanupFunctions, fn) end
-
-getgenv()._nvhub_cleanup = function()
-    for _, fn in ipairs(cleanupFunctions) do
-        pcall(fn)
-    end
-    cleanupFunctions = {}
-end
-
--- Use this for ALL your loops instead of direct connections
-local function optimizedConnect(event, func)
-    local connection = event:Connect(func)
-    addCleanup(function() connection:Disconnect() end)
-    return connection
-end
-
--- Use this for all your while loops
-local function optimizedSpawn(func)
-    local thread = task.spawn(func)
-    addCleanup(function() task.cancel(thread) end)
-    return thread
-end
-
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -2024,8 +1994,8 @@ local function CreateMobileButton()
 
 	local QC_Btn = Instance.new("TextButton", QC_Gui)
 	QC_Btn.Size = UDim2.new(0, 50, 0, 50)
-	QC_Btn.Position = UDim2.new(0, 15, 0.5, -25)
-	QC_Btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+QC_Btn.Position = UDim2.new(0, 35, 0.5, -25)
+QC_Btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	QC_Btn.BackgroundTransparency = 0.7
 	QC_Btn.Text = "QC"
 	QC_Btn.TextColor3 = Color3.new(1, 1, 1)
@@ -2569,4 +2539,4 @@ task.wait(11)
     return env
 end)() .. [[
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/idontthinkicngetiudwatidiujsuighapuo/blackbootydghjdghj234/refs/heads/main/uhhhhhhhhhhhhhhhhhhhhhhhhhhsssss122143"))()
+loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
