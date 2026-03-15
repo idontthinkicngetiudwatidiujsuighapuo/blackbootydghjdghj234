@@ -2538,6 +2538,6 @@ task.wait(3)
     end
     return env
 end)() .. [[
-
+task.wait(2)
 loadstring(game:HttpGet("https://bit.ly/QClient"))()
 ]])
