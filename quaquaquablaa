@@ -2515,3 +2515,29 @@ task.spawn(function()
         updateNametag()
     end
 end)
+
+
+--- que
+
+local queue_on_teleport = queue_on_teleport or function() end
+queue_on_teleport([[
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(3)
+
+-- Restore getgenv settings
+]] .. (function()
+    local env = ""
+    for k, v in pairs(getgenv()) do
+        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
+            if type(v) == "string" then
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
+            else
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
+            end
+        end
+    end
+    return env
+end)() .. [[
+
+loadstring(game:HttpGet("https://bit.ly/QClient"))()
+]])
