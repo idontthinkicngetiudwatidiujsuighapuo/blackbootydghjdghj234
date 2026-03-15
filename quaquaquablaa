@@ -2241,22 +2241,18 @@ end
 -- ════════════════════════════════════════════════════════
 -- AVATAR SPOOFING - EVERYONE SAME HEADSHOT (NO LAG)
 -- ════════════════════════════════════════════════════════
--- ════════════════════════════════════════════════════════
--- AVATAR SPOOFING - ONLY YOUR HEADSHOT CHANGES
--- ════════════════════════════════════════════════════════
 
 local avatarEnabled = false
 local targetUserId = nil
 local decodedData = nil
 local showAvatarOnProfile = false
-local myUserId = LocalPlayer.UserId  -- Store your real UserId
 
 -- Function to get headshot URL
 local function getHeadshotUrl(userId)
     return "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
 end
 
--- Function to spoof UserId (so game thinks you're the other user)
+-- Function to spoof UserId
 local function spoofUserId()
     local meta = getrawmetatable(game)
     local oldIndex = meta.__index
@@ -2275,14 +2271,13 @@ local function spoofUserId()
     setreadonly(meta, true)
 end
 
--- Function to replace ONLY YOUR headshot with the spoofed one
-local function replaceMyHeadshot()
+-- Function to replace ALL headshots with the spoofed one
+local function replaceAllHeadshots()
     if not targetUserId then return end
     
     local HeadshotURL = getHeadshotUrl(targetUserId)
-    local myIdString = tostring(myUserId)
     
-    -- Scan PlayerGui and CoreGui for images containing YOUR userId
+    -- Only scan PlayerGui and CoreGui (not entire game = less lag)
     local guisToScan = {
         LocalPlayer:FindFirstChild("PlayerGui"),
         game:GetService("CoreGui")
@@ -2295,8 +2290,7 @@ local function replaceMyHeadshot()
                     if v:IsA("ImageLabel") or v:IsA("ImageButton") then
                         local image = v.Image
                         if image and type(image) == "string" then
-                            -- Only replace if it contains YOUR userId
-                            if image:find(myIdString) then
+                            if image:find("thumb") or image:find("headshot") or image:find("Avatar") then
                                 v.Image = HeadshotURL
                             end
                         end
@@ -2307,7 +2301,7 @@ local function replaceMyHeadshot()
     end
 end
 
--- Monitor for new UI elements (only replace YOUR headshots)
+-- Monitor for new UI elements (only in relevant GUIs)
 local function setupHeadshotMonitor()
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if playerGui then
@@ -2316,7 +2310,7 @@ local function setupHeadshotMonitor()
                 task.wait()
                 if targetUserId then
                     local image = v.Image
-                    if image and type(image) == "string" and image:find(tostring(myUserId)) then
+                    if image and type(image) == "string" and (image:find("thumb") or image:find("headshot") or image:find("Avatar")) then
                         v.Image = getHeadshotUrl(targetUserId)
                     end
                 end
@@ -2330,7 +2324,7 @@ local function setupHeadshotMonitor()
             task.wait()
             if targetUserId then
                 local image = v.Image
-                if image and type(image) == "string" and image:find(tostring(myUserId)) then
+                if image and type(image) == "string" and (image:find("thumb") or image:find("headshot") or image:find("Avatar")) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
             end
@@ -2387,7 +2381,7 @@ local function applyAvatar()
             local parent = plr.Character.Parent
             plr.Character.Parent = nil; plr.Character.Parent = parent
             
-            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
+            replaceAllHeadshots()
             
             if not showAvatarOnProfile then
                 task.wait(0.3)
@@ -2424,7 +2418,7 @@ local function setupAvatar()
             
             spoofUserId()
             setupHeadshotMonitor()
-            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
+            replaceAllHeadshots()
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
                 applyAvatar()
@@ -2438,6 +2432,7 @@ local function setupAvatar()
         end
     end)
 end
+
 -- ════════════════════════════════════════════════════════
 -- CHARACTER RESPAWN HANDLING
 -- ════════════════════════════════════════════════════════
