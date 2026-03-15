@@ -2241,7 +2241,6 @@ end
 -- ════════════════════════════════════════════════════════
 -- AVATAR SPOOFING - IMPROVED VERSION WITH HEADSHOT REPLACEMENT
 -- ════════════════════════════════════════════════════════
-
 local avatarEnabled = false
 local targetUserId = nil
 local decodedData = nil
@@ -2272,17 +2271,17 @@ local function spoofUserId()
     setreadonly(meta, true)
 end
 
--- Function to replace headshots
-local function replaceHeadshots()
+-- Function to replace ALL headshots with the spoofed one
+local function replaceAllHeadshots()
     if not targetUserId then return end
     
     local HeadshotURL = getHeadshotUrl(targetUserId)
-    local oldIdPattern = tostring(LocalPlayer.UserId)
     
+    -- Scan EVERYTHING and replace ANY headshot with our spoofed one
     for _, v in pairs(game:GetDescendants()) do
         if v:IsA("ImageLabel") or v:IsA("ImageButton") then
             local image = v.Image
-            if image and type(image) == "string" and (image:find(oldIdPattern) or image:find("AvatarHeadShot") or image:find("headshot")) then
+            if image and type(image) == "string" and (image:find("rbxthumb") or image:find("AvatarHeadShot") or image:find("headshot") or image:find("thumbnail")) then
                 v.Image = HeadshotURL
             end
         end
@@ -2296,7 +2295,7 @@ local function setupHeadshotMonitor()
             task.wait()
             if targetUserId then
                 local image = v.Image
-                if image and type(image) == "string" and (image:find(tostring(LocalPlayer.UserId)) or image:find("AvatarHeadShot") or image:find("headshot")) then
+                if image and type(image) == "string" and (image:find("rbxthumb") or image:find("AvatarHeadShot") or image:find("headshot") or image:find("thumbnail")) then
                     v.Image = getHeadshotUrl(targetUserId)
                 end
             end
@@ -2359,8 +2358,8 @@ local function applyAvatar()
             local parent = plr.Character.Parent
             plr.Character.Parent = nil; plr.Character.Parent = parent
             
-            -- Replace headshots
-            replaceHeadshots()
+            -- Replace ALL headshots with spoofed one
+            replaceAllHeadshots()
             
             if not showAvatarOnProfile then
                 task.wait(0.3)
@@ -2402,8 +2401,8 @@ local function setupAvatar()
             -- Setup headshot monitor
             setupHeadshotMonitor()
             
-            -- Replace existing headshots
-            replaceHeadshots()
+            -- Replace ALL headshots immediately
+            replaceAllHeadshots()
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
                 applyAvatar()
@@ -2417,6 +2416,14 @@ local function setupAvatar()
         end
     end)
 end
+
+-- Optional: Keep refreshing to ensure all headshots stay the same
+task.spawn(function()
+    while avatarEnabled and targetUserId do
+        task.wait(10) -- Every 10 seconds
+        pcall(replaceAllHeadshots)
+    end
+end)
 
 -- ════════════════════════════════════════════════════════
 -- CHARACTER RESPAWN HANDLING
