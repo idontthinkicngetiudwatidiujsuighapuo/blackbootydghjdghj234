@@ -1,7 +1,29 @@
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
-task.wait(4)
+task.wait(2)
+
+local players = game:GetService("Players")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local httpService = game:GetService("GetService")
+local starterGui = game:GetService("StarterGui")
+local localPlayer = players.LocalPlayer
+
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "localscript3") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalitycsPipelineController") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+task.wait(2)
 
 frameCount = 0
 skipFrames = 2
@@ -2421,7 +2443,7 @@ local function waitForCharacterReady(char)
     char:WaitForChild("Humanoid", 10)
     char:WaitForChild("HumanoidRootPart", 10)
     char:WaitForChild("Head", 10)
-    task.wait(0.5)
+    task.wait(0.7)
 end
 
 local function setupDeathWatcher()
@@ -2503,7 +2525,7 @@ task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(1)
+    task.wait(3.6)
     
     updateStats()
     setupAvatar()
@@ -2511,7 +2533,7 @@ task.spawn(function()
 
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(6)
+        task.wait(5)
         updateNametag()
     end
 end)
