@@ -2028,10 +2028,10 @@ else
 end
 end)
 end
-
+task.wait(0.5)
 CreateMobileButton()
 
-task.wait(7)
+task.wait(6)
 -- Default values if getgenv variables aren't set
 local CONFIG = {
     -- Username & Display Name
