@@ -2511,9 +2511,9 @@ task.spawn(function()
     
 
     updateStats()
-setupHeadshotMonitor()
     setupAvatar()
-    
+    setupHeadshotMonitor()
+
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
         task.wait(5)
