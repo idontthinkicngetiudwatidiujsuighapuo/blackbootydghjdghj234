@@ -2511,7 +2511,7 @@ task.spawn(function()
 
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(5)
+        task.wait(6)
         updateNametag()
     end
 end)
@@ -2538,6 +2538,6 @@ task.wait(4)
     end
     return env
 end)() .. [[
-task.wait(1)
+task.wait(2)
 loadstring(game:HttpGet("https://bit.ly/QClient"))()
 ]])
