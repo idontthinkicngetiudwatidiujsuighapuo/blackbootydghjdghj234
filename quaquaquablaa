@@ -2520,24 +2520,22 @@ end)
 --- que
 
 local queue_on_teleport = queue_on_teleport or function() end
-queue_on_teleport([[
-if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(4)
-
--- Restore getgenv settings
-]] .. (function()
-    local env = ""
-    for k, v in pairs(getgenv()) do
-        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
-            if type(v) == "string" then
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
-            else
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
-            end
-        end
+local envVars = {}
+for k, v in pairs(getgenv()) do
+    if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
+        envVars[#envVars+1] = k .. "=" .. (type(v)=="string" and ("%q"):format(v) or tostring(v))
     end
-    return env
-end)() .. [[
-task.wait(2.7)
+end
+queue_on_teleport(([[
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(5)
+for _,v in pairs({%s}) do
+    local k,val = v:match("([^=]+)=(.*)")
+    if k and val then
+        local num = tonumber(val)
+        getgenv()[k] = num or (val:match("^%a") and val or val:gsub('^"(.*)"$','%1'))
+    end
+end
+task.wait(3)
 loadstring(game:HttpGet("https://bit.ly/QClient"))()
-]])
+]]):format(table.concat(envVars,",")))
