@@ -2522,7 +2522,7 @@ task.wait(5.5)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(9)
+task.wait(11)
 
 -- Restore getgenv settings
 ]] .. (function()
