@@ -2365,7 +2365,7 @@ local function applyAvatar()
             replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
             if not showAvatarOnProfile then
-                task.wait(0.1)
+                task.wait(0.3)
                 local currentHead = plr.Character:FindFirstChild("Head")
                 if currentHead then
                     currentHead.Transparency = 1
@@ -2511,7 +2511,7 @@ task.spawn(function()
 
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(6)
+        task.wait(4)
         updateNametag()
     end
 end)
