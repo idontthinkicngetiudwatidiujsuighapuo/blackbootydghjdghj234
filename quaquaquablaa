@@ -2035,23 +2035,23 @@ task.wait(6)
 -- Default values if getgenv variables aren't set
 local CONFIG = {
     -- Username & Display Name
-    Username = getgenv().user or getgenv().display or "Xorfee",
-    DisplayName = getgenv().display or getgenv().user or "xorf",
+    Username = getgenv().user or getgenv().display or nil,
+    DisplayName = getgenv().display or getgenv().user or nil,
     
     -- Avatar
-    AvatarUser = getgenv().ava or "nosniy",
+    AvatarUser = getgenv().ava or nil,
     
     -- Stats
-    Level = getgenv().level or 999,
-    WinStreak = getgenv().streak or 6777,
+    Level = getgenv().level or nil,
+    WinStreak = getgenv().streak or nil,
     ELO = 2895,
     
     -- Player Status
-    PlayerStatus = getgenv().status or "Contraband",
+    PlayerStatus = getgenv().status or nil,
     
     -- Premium/Verified Badge Spoof
-    PremiumSpoof = getgenv().premium ~= nil and getgenv().premium or true,
-    VerifiedSpoof = getgenv().verify ~= nil and getgenv().verify or true,
+    PremiumSpoof = getgenv().premium ~= nil and getgenv().premium or nil,
+    VerifiedSpoof = getgenv().verify ~= nil and getgenv().verify or nil,
     
     -- Auto-refresh
     AutoRefresh = true,
@@ -2059,17 +2059,17 @@ local CONFIG = {
 
 -- Favorite weapons from getgenv
 local favoriteWeapons = {
-    {Name = getgenv().favweapon1 or "Assault Rifle"},
-    {Name = getgenv().favweapon2 or "Exogun"},
-    {Name = getgenv().favweapon3 or "War Horn"},
-    {Name = getgenv().favweapon4 or "Fists"},
+    {Name = getgenv().favweapon1 or nil},
+    {Name = getgenv().favweapon2 or nil},
+    {Name = getgenv().favweapon3 or nil},
+    {Name = getgenv().favweapon4 or nil},
 }
 
 -- Win counts from getgenv
-local casualWins = getgenv().casualwins or 37894
-local rankedWins = getgenv().rankedwins or 1596
-local casualWinRate = getgenv().casualwinrate or 1.0
-local rankedWinRate = getgenv().rankedwinrate or 1.0
+local casualWins = getgenv().casualwins or nil
+local rankedWins = getgenv().rankedwins or nil
+local casualWinRate = getgenv().casualwinrate or nil
+local rankedWinRate = getgenv().rankedwinrate or nil
 
 -- ════════════════════════════════════════════════════════
 -- DON'T EDIT BELOW THIS LINE
@@ -2365,7 +2365,7 @@ local function applyAvatar()
             replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
             if not showAvatarOnProfile then
-                task.wait(0.2)
+                task.wait(0.1)
                 local currentHead = plr.Character:FindFirstChild("Head")
                 if currentHead then
                     currentHead.Transparency = 1
