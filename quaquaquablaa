@@ -2518,28 +2518,25 @@ end)
 
 
 --- que
-
+task.wait(5.5)
 local queue_on_teleport = queue_on_teleport or function() end
-
--- Collect ALL getgenv variables efficiently
-local envVars = {}
-local count = 0
-for k, v in pairs(getgenv()) do
-    count = count + 1
-    if count > 100 then break end -- Safety limit to prevent freezing
-    if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
-        if type(v) == "string" then
-            envVars[#envVars+1] = string.format("getgenv().%s = %q", k, v)
-        else
-            envVars[#envVars+1] = string.format("getgenv().%s = %s", k, tostring(v))
-        end
-    end
-end
-
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
 task.wait(3)
-]] .. table.concat(envVars, "\n") .. [[
 
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()
-]])
+-- Restore getgenv settings
+]] .. (function()
+    local env = ""
+    for k, v in pairs(getgenv()) do
+        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
+            if type(v) == "string" then
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
+            else
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
+            end
+        end
+    end
+    return env
+end)() .. [[
+
+loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
