@@ -2498,12 +2498,12 @@ end)
 -- ════════════════════════════════════════════════════════
 -- INITIALIZATION (NO REFRESH LOOP - NO LAG)
 -- ════════════════════════════════════════════════════════
-task.wait(0.1)
+
 task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(3)
+    task.wait(1)
     
     updateStats()
     setupAvatar()
@@ -2511,7 +2511,7 @@ task.spawn(function()
 
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(4)
+        task.wait(6)
         updateNametag()
     end
 end)
