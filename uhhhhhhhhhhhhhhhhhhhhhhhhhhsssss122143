@@ -1318,12 +1318,13 @@ end
 
 local cosmeticMetatable = { __index = function() return true end }
 local spoofedCosmetics  = setmetatable({}, cosmeticMetatable)
+local unlockedItems = {}
 
 local originalGet = dataCtrl.Get
 dataCtrl.Get = function(self, key)
 if config.unlockAll then
 	if key == "WeaponInventory"  then return equipped end
-	if key == "CosmeticInventory" or key == "OwnedWeapons" then return spoofedCosmetics end
+	if key == "CosmeticInventory" or key == "OwnedWeapons" then return setmetatable(unlockedItems, {__index=function() return true end}) end
 end
 return originalGet(self, key)
 end
@@ -1338,6 +1339,14 @@ end
 return originalGetUnlocked(self, ...)
 end
 
+local function unlockrarity(rarity)
+    for Name, Data in pairs(cosmeticLib.Cosmetics) do
+        if tostring(Data.Rarity) == rarity then
+            unlockedItems[Name] = true
+        end
+    end
+end
+
 if dataCtrl.CurrentData then
 	local oldRep = dataCtrl.CurrentData.Replicate
 	dataCtrl.CurrentData.Replicate = function(self, key, ...)
@@ -1346,6 +1355,12 @@ if dataCtrl.CurrentData then
 	end
 	return oldRep(self, key, ...)
 end
+end
+
+for _, v in ipairs({
+    "Unobtainable"," Mythical", "Legendary", "Epic", "Common", "Rare", "Unique"
+}) do
+    unlockrarity(v)
 end
 
 local RunService = game:GetService("RunService")
