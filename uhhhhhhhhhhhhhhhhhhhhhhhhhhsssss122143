@@ -2705,11 +2705,11 @@ task.spawn(function()
                 
                 -- Override click
                 btn.MouseButton1Click:Connect(function()
-                    task.wait(0.1)
+                    task.wait(1)
                     if not isRageActive then
                         -- Turning ON
                         saveCurrent()
-                        task.wait(0.1)
+                        task.wait(2)
                         applyConfig()
                         isRageActive = true
                         Flags["NVs rage config"] = true
