@@ -16,6 +16,7 @@ for i, v in getgc() do
         end)
     end
 end
+task.wait(0.5)
 for i, v in getgc() do
     if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalitycsPipelineController") then
         hookfunction(v, function()
@@ -23,11 +24,12 @@ for i, v in getgc() do
         end)
     end
 end
+
 task.wait(3)
 
 frameCount = 0
 skipFrames = 2
-task.wait(0.2)
+task.wait(1)
 getgenv().gg_scripters = nil
 getgenv().zoom_scripters = nil
 
