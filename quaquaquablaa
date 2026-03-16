@@ -105,7 +105,7 @@ local function smoothLoad()
 end
 task.wait(0.5)
 smoothLoad()
-task.wait(0.5)
+task.wait(1)
 
 local SHOW_SPEED = 0.8
 local HIDE_SPEED = 0.95
@@ -2539,12 +2539,11 @@ task.spawn(function()
 end)
 
 
---- que
-task.wait(15)
+
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(11)
+task.wait(12)
 
 -- Restore getgenv settings
 ]] .. (function()
