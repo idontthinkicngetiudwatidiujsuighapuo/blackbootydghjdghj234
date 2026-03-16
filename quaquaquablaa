@@ -2242,48 +2242,6 @@ end
 -- AVATAR SPOOFING - ONLY YOUR HEADSHOT CHANGES
 -- ════════════════════════════════════════════════════════
 
--- Add this near the top with your other variables
-local isOnQueuePad = false
-local queueCheckConnection = nil
-
--- Add this function
-local function checkForQueuePad()
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    -- Check if queue UI is visible (most reliable method)
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        for _, v in pairs(playerGui:GetDescendants()) do
-            if v:IsA("TextLabel") and v.Text and v.Text:find("queue") then
-                return true
-            end
-        end
-    end
-    return false
-end
-
--- Add this loop to monitor queue state
-task.spawn(function()
-    while task.wait(1) do
-        local onPad = checkForQueuePad()
-        if onPad ~= isOnQueuePad then
-            isOnQueuePad = onPad
-            if isOnQueuePad then
-                -- On queue pad - temporarily disable avatar modifications
-                avatarEnabled = false
-            else
-                -- Left queue pad - re-enable avatar
-                avatarEnabled = true
-                if CONFIG.AvatarUser then
-                    task.wait(2)
-                    setupAvatar() -- Reapply avatar
-                end
-            end
-        end
-    end
-end)
-
 local avatarEnabled = false
 local targetUserId = nil
 local decodedData = nil
@@ -2423,8 +2381,7 @@ local function applyAvatar()
                 end
             end
             
-            local parent = plr.Character.Parent
-            plr.Character.Parent = nil; plr.Character.Parent = parent
+
             
             replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
