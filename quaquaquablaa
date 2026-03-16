@@ -2525,9 +2525,10 @@ task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(3.6)
+    task.wait(2)
     
     updateStats()
+task.wait(2)
     setupAvatar()
     setupHeadshotMonitor()
 
