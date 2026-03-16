@@ -3,7 +3,7 @@ assert(hookmetamethod, "Your executor doesn't support hookmetamethod.")
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
-task.wait(2)
+task.wait(4)
 
 local players = game:GetService("Players")
 local replicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,6 +18,7 @@ for i, v in getgc() do
         end)
     end
 end
+task.wait(0.7)
 for i, v in getgc() do
     if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
         hookfunction(v, function()
@@ -25,7 +26,7 @@ for i, v in getgc() do
         end)
     end
 end
-
+task.wait(2)
 
 -- Services
 local TweenService = game:GetService("TweenService")
@@ -69,7 +70,7 @@ MainFrame.BorderSizePixel = 0
 MainFrame.Parent = ShadowFrame
 
 local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 10) -- High corner radius
+MainCorner.CornerRadius = UDim.new(0, 8) -- High corner radius
 MainCorner.Parent = MainFrame
 
 -- 3. SIDE-BY-SIDE CONTENT
@@ -88,7 +89,7 @@ Title.Parent = MainFrame
 local TitleGlow = Instance.new("UIStroke")
 TitleGlow.Color = Color3.fromRGB(255, 255, 255)
 TitleGlow.Thickness = 1.2
-TitleGlow.Transparency = 0.75 -- White Glow
+TitleGlow.Transparency = 0.6 -- White Glow
 TitleGlow.Parent = Title
 
 -- 4. TOGGLE BOX (Right side)
@@ -186,7 +187,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     end
 end)
 
--- MAIN UNLOCK SCRIPT (EXACTLY AS PROVIDED)
+-- MAIN UNLOCK SCRIPT (IMPROVED VERSION)
 local h = game:GetService("HttpService")
 if typeof(h) ~= "Instance" or h.ClassName ~= "HttpService" then
 	while true do task.wait(9e9) end
@@ -228,7 +229,7 @@ local function loadSettings()
 		if ok and decoded then
 			equipped = decoded.Skins or {}
 			config.unlockAll = decoded.UnlockToggle
-			_Enabled = config.unlockAll  -- Sync toggle with saved config
+			_Enabled = config.unlockAll
 		end
 	end
 end
@@ -378,12 +379,13 @@ end
 
 local cosmeticMetatable = { __index = function() return true end }
 local spoofedCosmetics  = setmetatable({}, cosmeticMetatable)
+local unlockedItems = {}
 
 local originalGet = dataCtrl.Get
 dataCtrl.Get = function(self, key)
 if config.unlockAll then
 	if key == "WeaponInventory"  then return equipped end
-	if key == "CosmeticInventory" or key == "OwnedWeapons" then return spoofedCosmetics end
+	if key == "CosmeticInventory" or key == "OwnedWeapons" then return setmetatable(unlockedItems, {__index=function() return true end}) end
 end
 return originalGet(self, key)
 end
@@ -398,6 +400,14 @@ end
 return originalGetUnlocked(self, ...)
 end
 
+local function unlockRarity(rarity)
+    for Name, Data in pairs(cosmeticLib.Cosmetics) do
+        if tostring(Data.Rarity) == rarity then
+            unlockedItems[Name] = true
+        end
+    end
+end
+
 if dataCtrl.CurrentData then
 	local oldRep = dataCtrl.CurrentData.Replicate
 	dataCtrl.CurrentData.Replicate = function(self, key, ...)
@@ -408,31 +418,22 @@ if dataCtrl.CurrentData then
 end
 end
 
--- INITIALIZE
+-- Unlock all rarities
+for _, v in ipairs({
+    "Unobtainable", "Mythical", "Legendary", "Epic", "Common", "Rare", "Unique"
+}) do
+    unlockRarity(v)
+end
+
+-- Initialize
 LoadConfig()
 config.unlockAll = _Enabled
 UpdateToggleVisuals(true)
 
-
-task.wait(5)
+task.wait(3)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(5)
-
--- Restore getgenv settings
-]] .. (function()
-    local env = ""
-    for k, v in pairs(getgenv()) do
-        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
-            if type(v) == "string" then
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
-            else
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
-            end
-        end
-    end
-    return env
-end)() .. [[
-task.wait(1)
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/8b4f2c28182df80e4e05d09d8674746539fcf27f0f4df456cb44f28a4af0f73f/download"))()]])
+task.wait(9)
+loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/8b4f2c28182df80e4e05d09d8674746539fcf27f0f4df456cb44f28a4af0f73f/download"))()
+]])
