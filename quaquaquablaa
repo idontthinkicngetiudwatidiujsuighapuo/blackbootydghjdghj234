@@ -3,6 +3,13 @@ if not game:IsLoaded() then
 end
 task.wait(2)
 
+if method == "HttpGet" or method == "HttpPost" then
+	local caller = getcallingscript()
+	if caller and tostring(caller):lower():find("spy") then
+		return "{}"
+	end
+end
+
 local players = game:GetService("Players")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local httpService = game:GetService("GetService")
