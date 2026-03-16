@@ -23,7 +23,7 @@ for i, v in getgc() do
         end)
     end
 end
-task.wait(2)
+task.wait(3)
 
 frameCount = 0
 skipFrames = 2
@@ -32,18 +32,41 @@ getgenv().gg_scripters = nil
 getgenv().zoom_scripters = nil
 
 local Flags = {
-["Aimbot Enable"] = false,
-["Show Circle"] = false,
-["AimBind"] = "None",
-["Mode"] = "Toggle",
-["Target"] = "Head",
-["Smoothness"] = 1,
-["Shake"] = 0,
-["Prediction"] = 0,
-["Radius"] = 100,
-["Opacity"] = 20,
-["Circle Color"] = Color3.fromRGB(255, 255, 255)
+    -- Aimbot
+    ["Aimbot Enable"] = false,
+    ["Show Circle"] = false,
+    ["AimBind"] = "None",
+    ["Mode"] = "Toggle",
+    ["Target"] = "Head",
+    ["Smoothness"] = 1,
+    ["Shake"] = 0,
+    ["Prediction"] = 0,
+    ["Radius"] = 100,
+    ["Opacity"] = 20,
+    ["Circle Color"] = Color3.fromRGB(255, 255, 255),
+    
+    -- Rage Config (ALL START DISABLED)
+    ["NVs rage config"] = false,
+    ["Rage Silent"] = false,
+    ["Rage TP"] = false,
+    ["Max Distance"] = 10000,
+    ["Height Offset"] = 20,
+    ["Enable GunMods"] = false,
+    ["ShootRecoil"] = 0,
+    ["ShootSpread"] = 0,
+    ["ProjectileSpeed"] = 1000,
+    ["ShootCooldown"] = 0,
+    ["Auto Switch Wpns"] = false,
+    ["Orbit Enabled"] = false,
+    ["Orbit Amount"] = 3,
+    ["Orbit Speed"] = 100,
+    ["Orbit Radius"] = 10,
+    ["Enable Spinbot"] = false,
+    ["Spinbot Speed"] = 0,
+    ["Enable Jitter"] = false,
+    ["Jitter Amount"] = 0,
 }
+
 
 local flagsFile = "NvFlags.json"
 local dropHeaders = {
@@ -427,6 +450,7 @@ createToggle(nil, "Rage TP")
 createToggle(nil, "Auto Switch Wpns")
 createSlider(nil, "Max Distance", 10000)
 createSlider(nil, "Height Offset", 20)
+createToggle(nil, "NVs rage config")
 closeToggleDrop()
 end)
 
@@ -475,6 +499,12 @@ createSlider(nil, "Orbit Amount", 500)
 createSlider(nil, "Orbit Speed", 500)
 createSlider(nil, "Orbit Radius", 500)
 createSlider(nil, "Orbit Max distance", 500)
+closeToggleDrop()
+createToggleDrop(p, "spinbot + jitter")
+createSlider(nil, "Jitter Amount", 500)
+createSlider(nil, "Spinbot Speed", 500)
+createToggle(nil, "Enable Jitter")
+createToggle(nil, "Enable Spinbot")
 closeToggleDrop()
 createToggle(nil, "Auto SlideJump")
 end)
@@ -962,7 +992,39 @@ if opacity ~= config.Transparency then
 	setTransparency(opacity)
 end
 end)
-
+-- Spinbot & Jitter Function - Add at bottom of script
+task.spawn(function()
+    task.wait(3)
+    
+    local spinAngle = 0
+    
+    game:GetService("RunService").Heartbeat:Connect(function()
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char and char:FindFirstChild("Humanoid")
+        if not root or not humanoid then return end
+        
+        -- Spinbot
+        if Flags["Enable Spinbot"] then
+            local speed = Flags["Spinbot Speed"] or 0
+            if speed > 0 then
+                spinAngle = (spinAngle + speed/10) % 360
+                root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(spinAngle), 0)
+            end
+        end
+        
+        -- Jitter
+        if Flags["Enable Jitter"] then
+            local amount = (Flags["Jitter Amount"] or 0) / 100
+            if amount > 0 then
+                local jitterX = (math.random() - 0.5) * amount
+                local jitterY = (math.random() - 0.5) * amount * 0.5
+                local jitterZ = (math.random() - 0.5) * amount
+                root.CFrame = root.CFrame * CFrame.new(jitterX, jitterY, jitterZ)
+            end
+        end
+    end)
+end)
 -- We reset this to nil to ensure the loop actually starts when you execute
 getgenv().gg_scripters = nil
 
@@ -1318,12 +1380,13 @@ end
 
 local cosmeticMetatable = { __index = function() return true end }
 local spoofedCosmetics  = setmetatable({}, cosmeticMetatable)
+local unlockedItems = {}
 
 local originalGet = dataCtrl.Get
 dataCtrl.Get = function(self, key)
 if config.unlockAll then
 	if key == "WeaponInventory"  then return equipped end
-	if key == "CosmeticInventory" or key == "OwnedWeapons" then return spoofedCosmetics end
+	if key == "CosmeticInventory" or key == "OwnedWeapons" then return setmetatable(unlockedItems, {__index=function() return true end}) end
 end
 return originalGet(self, key)
 end
@@ -1338,6 +1401,14 @@ end
 return originalGetUnlocked(self, ...)
 end
 
+local function unlockrarity(rarity)
+    for Name, Data in pairs(cosmeticLib.Cosmetics) do
+        if tostring(Data.Rarity) == rarity then
+            unlockedItems[Name] = true
+        end
+    end
+end
+
 if dataCtrl.CurrentData then
 	local oldRep = dataCtrl.CurrentData.Replicate
 	dataCtrl.CurrentData.Replicate = function(self, key, ...)
@@ -1346,6 +1417,12 @@ if dataCtrl.CurrentData then
 	end
 	return oldRep(self, key, ...)
 end
+end
+
+for _, v in ipairs({
+    "Unobtainable"," Mythical", "Legendary", "Epic", "Common", "Rare", "Unique"
+}) do
+    unlockrarity(v)
 end
 
 local RunService = game:GetService("RunService")
@@ -2539,7 +2616,119 @@ task.wait(2)
     end
 end)
 
-
+-- NVs Rage Config - FIXED VERSION
+task.spawn(function()
+    task.wait(5)
+    
+    local savedSettings = {}
+    local isRageActive = false
+    
+    local function saveCurrent()
+        savedSettings = {
+            ["Rage Silent"] = Flags["Rage Silent"],
+            ["Rage TP"] = Flags["Rage TP"],
+            ["Max Distance"] = Flags["Max Distance"],
+            ["Height Offset"] = Flags["Height Offset"],
+            ["Enable GunMods"] = Flags["Enable GunMods"],
+            ["ShootRecoil"] = Flags["ShootRecoil"],
+            ["ShootSpread"] = Flags["ShootSpread"],
+            ["ProjectileSpeed"] = Flags["ProjectileSpeed"],
+            ["ShootCooldown"] = Flags["ShootCooldown"],
+            ["Auto Switch Wpns"] = Flags["Auto Switch Wpns"],
+            ["Orbit Enabled"] = Flags["Orbit Enabled"],
+            ["Orbit Amount"] = Flags["Orbit Amount"],
+            ["Orbit Speed"] = Flags["Orbit Speed"],
+            ["Orbit Radius"] = Flags["Orbit Radius"],
+            ["Enable Spinbot"] = Flags["Enable Spinbot"],
+            ["Spinbot Speed"] = Flags["Spinbot Speed"],
+            ["Enable Jitter"] = Flags["Enable Jitter"],
+            ["Jitter Amount"] = Flags["Jitter Amount"],
+        }
+    end
+    
+    local function loadSaved()
+        for k, v in pairs(savedSettings) do
+            Flags[k] = v
+        end
+        -- Update UI elements to show correct state
+        for _, e in ipairs(Elements) do
+            if e.Type == "Button" and e.Instance then
+                if Flags[e.Instance.Text] == true then
+                    e.Instance.BackgroundColor3 = Theme.Accent
+                    e.Instance.TextColor3 = Color3.new(1,1,1)
+                else
+                    e.Instance.BackgroundColor3 = Theme.Btn
+                    e.Instance.TextColor3 = Theme.Text
+                end
+            end
+        end
+    end
+    
+    local function applyConfig()
+        Flags["Rage Silent"] = true
+        Flags["Rage TP"] = true
+        Flags["Max Distance"] = 800
+        Flags["Height Offset"] = 18
+        Flags["Enable GunMods"] = true
+        Flags["ShootRecoil"] = 0
+        Flags["ShootSpread"] = 0
+        Flags["ProjectileSpeed"] = 1000
+        Flags["ShootCooldown"] = 0
+        Flags["Auto Switch Wpns"] = true
+        Flags["Orbit Enabled"] = true
+        Flags["Orbit Amount"] = 20
+        Flags["Orbit Speed"] = 500
+        Flags["Orbit Radius"] = 6
+        Flags["Enable Spinbot"] = true
+        Flags["Spinbot Speed"] = 499
+        Flags["Enable Jitter"] = true
+        Flags["Jitter Amount"] = 499
+        
+        -- Update UI elements to show enabled state
+        for _, e in ipairs(Elements) do
+            if e.Type == "Button" and e.Instance then
+                if Flags[e.Instance.Text] == true then
+                    e.Instance.BackgroundColor3 = Theme.Accent
+                    e.Instance.TextColor3 = Color3.new(1,1,1)
+                end
+            end
+        end
+    end
+    
+    -- Find and hook the toggle
+    local found = false
+    while not found do
+        for _, v in pairs(Elements) do
+            if v.Type == "Button" and v.Instance and v.Instance.Text == "NVs rage config" then
+                found = true
+                local btn = v.Instance
+                
+                -- Override click
+                btn.MouseButton1Click:Connect(function()
+                    task.wait(0.1)
+                    if not isRageActive then
+                        -- Turning ON
+                        saveCurrent()
+                        task.wait(0.1)
+                        applyConfig()
+                        isRageActive = true
+                        Flags["NVs rage config"] = true
+                        btn.BackgroundColor3 = Theme.Accent
+                    else
+                        -- Turning OFF
+                        isRageActive = false
+                        Flags["NVs rage config"] = false
+                        task.wait(0.1)
+                        loadSaved()
+                        btn.BackgroundColor3 = Theme.Btn
+                    end
+                end)
+                break
+            end
+        end
+        if not found then task.wait(1) end
+    end
+end)
 
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
