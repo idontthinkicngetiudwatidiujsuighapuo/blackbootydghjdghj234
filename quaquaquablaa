@@ -2381,7 +2381,8 @@ local function applyAvatar()
                 end
             end
             
-
+           local parent = plr.Character.Parent
+            plr.Character.Parent = nil; plr.Character.Parent = parent
             
             replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
