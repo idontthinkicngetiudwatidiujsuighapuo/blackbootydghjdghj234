@@ -2594,9 +2594,7 @@ task.spawn(function()
     end))
 end)
 
--- ════════════════════════════════════════════════════════
--- INITIALIZATION (NO REFRESH LOOP - NO LAG)
--- ════════════════════════════════════════════════════════
+
 
 task.spawn(function()
     if not game:IsLoaded() then
@@ -2729,7 +2727,7 @@ task.spawn(function()
         if not found then task.wait(1) end
     end
 end)
-
+task.wait(5)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -2749,5 +2747,5 @@ task.wait(12)
     end
     return env
 end)() .. [[
-task.wait(1)
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
+task.wait(2)
+loadstring(game:HttpGet(""))()]])
