@@ -1,7 +1,29 @@
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
-task.wait(3)
+task.wait(2)
+
+local players = game:GetService("Players")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local httpService = game:GetService("GetService")
+local starterGui = game:GetService("StarterGui")
+local localPlayer = players.LocalPlayer
+
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "localscript3") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalitycsPipelineController") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+task.wait(2)
 
 frameCount = 0
 skipFrames = 2
@@ -83,7 +105,7 @@ local function smoothLoad()
 end
 task.wait(0.5)
 smoothLoad()
-task.wait(0.5)
+task.wait(1)
 
 local SHOW_SPEED = 0.8
 local HIDE_SPEED = 0.95
@@ -2359,7 +2381,7 @@ local function applyAvatar()
                 end
             end
             
-            local parent = plr.Character.Parent
+           local parent = plr.Character.Parent
             plr.Character.Parent = nil; plr.Character.Parent = parent
             
             replaceMyHeadshot()  -- Changed from replaceAllHeadshots
@@ -2421,7 +2443,7 @@ local function waitForCharacterReady(char)
     char:WaitForChild("Humanoid", 10)
     char:WaitForChild("HumanoidRootPart", 10)
     char:WaitForChild("Head", 10)
-    task.wait(0.5)
+    task.wait(0.7)
 end
 
 local function setupDeathWatcher()
@@ -2503,26 +2525,26 @@ task.spawn(function()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-    task.wait(3)
+    task.wait(2)
     
     updateStats()
+task.wait(2)
     setupAvatar()
     setupHeadshotMonitor()
 
     if LocalPlayer.Character then
         updateHumanoidDisplayName()
-        task.wait(4)
+        task.wait(5)
         updateNametag()
     end
 end)
 
 
---- que
-task.wait(100)
+
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(11)
+task.wait(12)
 
 -- Restore getgenv settings
 ]] .. (function()
@@ -2538,5 +2560,5 @@ task.wait(11)
     end
     return env
 end)() .. [[
-
+task.wait(1)
 loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
