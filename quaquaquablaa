@@ -2733,7 +2733,7 @@ end)
 local queue_on_teleport = queue_on_teleport or function() end
 queue_on_teleport([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(12)
+task.wait(11)
 
 -- Restore getgenv settings
 ]] .. (function()
@@ -2749,5 +2749,5 @@ task.wait(12)
     end
     return env
 end)() .. [[
-task.wait(1)
+task.wait(2)
 loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
