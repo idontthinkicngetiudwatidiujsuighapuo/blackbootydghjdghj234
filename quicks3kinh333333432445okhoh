@@ -1,0 +1,438 @@
+assert(hookmetamethod, "Your executor doesn't support hookmetamethod.")
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+task.wait(2)
+
+local players = game:GetService("Players")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local httpService = game:GetService("GetService")
+local starterGui = game:GetService("StarterGui")
+local localPlayer = players.LocalPlayer
+
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+for i, v in getgc() do
+    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
+        hookfunction(v, function()
+            return task.wait(9e9) 
+        end)
+    end
+end
+
+
+-- Services
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+-- Variables
+local CONFIG_FILE = "UnlockAll_Premium_Fixed.json"
+local _Enabled = false
+local _Visible = false
+
+-- UI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PremiumToggleUI"
+ScreenGui.Parent = game:GetService("CoreGui")
+ScreenGui.DisplayOrder = 999
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- 1. SHADOW WRAPPER (Outer Shadow - Your requested asset)
+local ShadowFrame = Instance.new("ImageLabel")
+ShadowFrame.Name = "Shadow"
+ShadowFrame.AnchorPoint = Vector2.new(0.5, 0)
+ShadowFrame.Position = UDim2.new(0.5, 0, 0, -180) -- Starts hidden off-top
+ShadowFrame.Size = UDim2.new(0, 260, 0, 80) -- Horizontal pill shape
+ShadowFrame.BackgroundTransparency = 1
+ShadowFrame.Image = "rbxassetid://6014261993" -- Premium shadow asset
+ShadowFrame.ImageColor3 = Color3.fromRGB(0, 0, 0)
+ShadowFrame.ImageTransparency = 0.15
+ShadowFrame.ScaleType = Enum.ScaleType.Slice
+ShadowFrame.SliceCenter = Rect.new(49, 49, 450, 450) -- Perfectly rounds the shadow
+ShadowFrame.Parent = ScreenGui
+
+-- 2. MAIN CONTAINER (The dark box with very high corner radius)
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(1, -40, 1, -40) -- Padding for shadow to bleed out
+MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10) -- Very Dark
+MainFrame.BorderSizePixel = 0
+MainFrame.Parent = ShadowFrame
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10) -- High corner radius
+MainCorner.Parent = MainFrame
+
+-- 3. SIDE-BY-SIDE CONTENT
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Enable unlock all"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamMedium 
+Title.TextSize = 13
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = MainFrame
+
+local TitleGlow = Instance.new("UIStroke")
+TitleGlow.Color = Color3.fromRGB(255, 255, 255)
+TitleGlow.Thickness = 1.2
+TitleGlow.Transparency = 0.75 -- White Glow
+TitleGlow.Parent = Title
+
+-- 4. TOGGLE BOX (Right side)
+local ToggleBox = Instance.new("Frame")
+ToggleBox.Name = "ToggleBox"
+ToggleBox.Size = UDim2.new(0, 18, 0, 18)
+ToggleBox.Position = UDim2.new(1, -20, 0.5, 0)
+ToggleBox.AnchorPoint = Vector2.new(1, 0.5)
+ToggleBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleBox.BorderSizePixel = 0
+ToggleBox.Parent = MainFrame
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 7)
+ToggleCorner.Parent = ToggleBox
+
+local ToggleStroke = Instance.new("UIStroke")
+ToggleStroke.Color = Color3.fromRGB(255, 255, 255)
+ToggleStroke.Thickness = 1
+ToggleStroke.Transparency = 0.8
+ToggleStroke.Parent = ToggleBox
+
+-- Toggle Neon Glow (Only visible when enabled)
+local ToggleGlow = Instance.new("ImageLabel")
+ToggleGlow.Name = "NeonGlow"
+ToggleGlow.ZIndex = -1
+ToggleGlow.AnchorPoint = Vector2.new(0.5, 0.5)
+ToggleGlow.Position = UDim2.new(0.5, 0, 0.5, 0)
+ToggleGlow.Size = UDim2.new(0, 45, 0, 45)
+ToggleGlow.BackgroundTransparency = 1
+ToggleGlow.Image = "rbxassetid://6015267023"
+ToggleGlow.ImageColor3 = Color3.fromRGB(255, 255, 255)
+ToggleGlow.ImageTransparency = 1 -- Default hidden
+ToggleGlow.Parent = ToggleBox
+
+local ClickBtn = Instance.new("TextButton")
+ClickBtn.Size = UDim2.new(1, 0, 1, 0)
+ClickBtn.BackgroundTransparency = 1
+ClickBtn.Text = ""
+ClickBtn.Parent = ToggleBox
+
+-- LOGIC FUNCTIONS
+local function SaveConfig()
+    if writefile then
+        local success, err = pcall(function()
+            writefile(CONFIG_FILE, HttpService:JSONEncode({Enabled = _Enabled}))
+        end)
+    end
+end
+
+local function LoadConfig()
+    if isfile and isfile(CONFIG_FILE) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(CONFIG_FILE))
+        end)
+        if success and result.Enabled ~= nil then
+            _Enabled = result.Enabled
+        end
+    end
+end
+
+local function UpdateToggleVisuals(instant)
+    local t = instant and 0 or 0.4
+    local info = TweenInfo.new(t, Enum.EasingStyle.Quart)
+    
+    local color = _Enabled and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(30, 30, 30)
+    local glow = _Enabled and 0.5 or 1
+    local stroke = _Enabled and 0 or 0.8
+    
+    TweenService:Create(ToggleBox, info, {BackgroundColor3 = color}):Play()
+    TweenService:Create(ToggleGlow, info, {ImageTransparency = glow}):Play()
+    TweenService:Create(ToggleStroke, info, {Transparency = stroke}):Play()
+end
+
+local function ToggleMenu()
+    _Visible = not _Visible
+    -- Slow Bouncy Animation (1.4s)
+    local targetY = _Visible and -12 or -180 
+    local info = TweenInfo.new(1.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    
+    TweenService:Create(ShadowFrame, info, {Position = UDim2.new(0.5, 0, 0, targetY)}):Play()
+end
+
+-- LISTENERS
+ClickBtn.MouseButton1Click:Connect(function()
+    _Enabled = not _Enabled
+    config.unlockAll = _Enabled  -- Update the main config
+    UpdateToggleVisuals(false)
+    SaveConfig()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if not gpe and input.KeyCode == Enum.KeyCode.RightShift then
+        ToggleMenu()
+    end
+end)
+
+-- MAIN UNLOCK SCRIPT (EXACTLY AS PROVIDED)
+local h = game:GetService("HttpService")
+if typeof(h) ~= "Instance" or h.ClassName ~= "HttpService" then
+	while true do task.wait(9e9) end
+end
+
+local TIMEOUT = 10
+local fileName = "QClientSkins.json"
+
+config = {
+unlockAll = false,
+finishersoundenabled = true,
+finishersoundfile = "valorant_finisher.mp3",
+shootsoundenabled = false,
+shootsoundfile = "uwu_hannah.mp3"
+}
+
+local services = setmetatable({}, {
+__index = function(t, v)
+local s = cloneref(game:GetService(v))
+t[v] = s
+return s
+end
+})
+
+local equipped = {}
+local spoofCache = {}
+
+local function saveSettings()
+	local ok, content = pcall(h.JSONEncode, h, {
+	Skins = equipped,
+	UnlockToggle = config.unlockAll
+	})
+	if ok then writefile(fileName, content) end
+end
+
+local function loadSettings()
+	if isfile(fileName) then
+		local ok, decoded = pcall(function() return h:JSONDecode(readfile(fileName)) end)
+		if ok and decoded then
+			equipped = decoded.Skins or {}
+			config.unlockAll = decoded.UnlockToggle
+			_Enabled = config.unlockAll  -- Sync toggle with saved config
+		end
+	end
+end
+
+loadSettings()
+
+-- Update config.unlockAll from toggle
+task.spawn(function()
+while true do
+	config.unlockAll = _Enabled
+	task.wait(0.1)
+end
+end)
+
+local localPlayer = services.Players.LocalPlayer
+local playerScripts = localPlayer:WaitForChild("PlayerScripts", TIMEOUT)
+local modules       = services.ReplicatedStorage:WaitForChild("Modules", TIMEOUT)
+local controllers   = playerScripts and playerScripts:WaitForChild("Controllers", TIMEOUT)
+
+if not (modules and controllers) then
+	warn("[NvSkins] Failed to find core modules — aborting")
+	return
+end
+
+local cosmeticLib = require(modules:WaitForChild("CosmeticLibrary", TIMEOUT))
+local itemLib     = require(modules:WaitForChild("ItemLibrary", TIMEOUT))
+local dataCtrl    = require(controllers:WaitForChild("PlayerDataController", TIMEOUT))
+
+if not (cosmeticLib and itemLib and dataCtrl) then
+	warn("[NvSkins] Failed to require core modules — aborting")
+	return
+end
+
+local oldNC
+oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+local method = getnamecallmethod()
+
+if method == "FireServer" and self.Name == "EquipCosmetic" then
+	if not config.unlockAll then return oldNC(self, ...) end
+
+	local args = {...}
+	local weaponName, cosmeticType, cosmeticName, options = args[1], args[2], args[3], args[4]
+
+	equipped[weaponName] = equipped[weaponName] or {}
+
+	if not cosmeticName or cosmeticName == "" or cosmeticName == "None" then
+		equipped[weaponName][cosmeticType] = nil
+	else
+		local base = cosmeticLib.Cosmetics[cosmeticName]
+		if base then
+			local cloned = {
+			Name     = cosmeticName,
+			Seed     = math.random(1, 1e6),
+			Inverted = options and options.IsInverted or false
+			}
+			for k, v in pairs(base) do cloned[k] = v end
+			equipped[weaponName][cosmeticType] = cloned
+		end
+	end
+
+	spoofCache[weaponName] = nil
+	saveSettings()
+
+	if dataCtrl.CurrentData then
+		dataCtrl.CurrentData:Replicate("WeaponInventory")
+	end
+	return
+end
+
+return oldNC(self, ...)
+end))
+
+task.spawn(function()
+local clientItemMod = playerScripts
+:WaitForChild("Modules", TIMEOUT)
+:WaitForChild("ClientReplicatedClasses", TIMEOUT)
+:WaitForChild("ClientFighter", TIMEOUT)
+:WaitForChild("ClientItem", TIMEOUT)
+
+if not clientItemMod then
+	warn("[NvSkins] ClientItem module not found")
+	return
+end
+
+local clientItem = require(clientItemMod)
+local vmMod = clientItemMod:WaitForChild("ClientViewModel", TIMEOUT)
+if not vmMod then return end
+local viewModel = require(vmMod)
+
+local origCreateVM = clientItem._CreateViewModel
+clientItem._CreateViewModel = function(self, vmRef)
+if config.unlockAll and vmRef and self.ClientFighter and self.ClientFighter.Player == localPlayer then
+	local weaponEquipped = equipped[self.Name]
+	if weaponEquipped then
+		local dataKey = self:ToEnum("Data")
+		local data = vmRef[dataKey]
+		if data then
+			if weaponEquipped.Skin then
+				data[self:ToEnum("Skin")] = weaponEquipped.Skin
+				data[self:ToEnum("Name")] = weaponEquipped.Skin.Name
+			end
+			if weaponEquipped.Charm then
+				data[self:ToEnum("Charm")] = weaponEquipped.Charm
+			end
+		end
+	end
+end
+return origCreateVM(self, vmRef)
+end
+
+local origGetWrap = viewModel.GetWrap
+viewModel.GetWrap = function(self)
+if config.unlockAll then
+	local item = self.ClientItem
+	if item and item.ClientFighter and item.ClientFighter.Player == localPlayer then
+		local weaponEquipped = equipped[item.Name]
+		if weaponEquipped and weaponEquipped.Wrap then
+			return weaponEquipped.Wrap
+		end
+	end
+end
+return origGetWrap(self)
+end
+end)
+
+-- DataController patches
+local originalGetWeaponData = dataCtrl.GetWeaponData
+dataCtrl.GetWeaponData = function(self, weaponName)
+if not config.unlockAll then return originalGetWeaponData(self, weaponName) end
+if spoofCache[weaponName] then return spoofCache[weaponName] end
+
+local realData = originalGetWeaponData(self, weaponName)
+local spoofed = { Unlocked = true, Level = 100, XP = 99999, Name = weaponName }
+
+if realData then
+	for k, v in pairs(realData) do spoofed[k] = v end
+end
+spoofed.Unlocked = true
+
+if equipped[weaponName] then
+	for k, v in pairs(equipped[weaponName]) do spoofed[k] = v end
+end
+
+spoofCache[weaponName] = spoofed
+return spoofed
+end
+
+local cosmeticMetatable = { __index = function() return true end }
+local spoofedCosmetics  = setmetatable({}, cosmeticMetatable)
+
+local originalGet = dataCtrl.Get
+dataCtrl.Get = function(self, key)
+if config.unlockAll then
+	if key == "WeaponInventory"  then return equipped end
+	if key == "CosmeticInventory" or key == "OwnedWeapons" then return spoofedCosmetics end
+end
+return originalGet(self, key)
+end
+
+local originalGetUnlocked = dataCtrl.GetUnlockedWeapons
+dataCtrl.GetUnlockedWeapons = function(self, ...)
+if config.unlockAll then
+	local weapons = {}
+	for name in pairs(itemLib.Items) do weapons[name] = true end
+	return weapons
+end
+return originalGetUnlocked(self, ...)
+end
+
+if dataCtrl.CurrentData then
+	local oldRep = dataCtrl.CurrentData.Replicate
+	dataCtrl.CurrentData.Replicate = function(self, key, ...)
+	if config.unlockAll and (key == "WeaponInventory" or key == "OwnedWeapons") then
+		return
+	end
+	return oldRep(self, key, ...)
+end
+end
+
+-- INITIALIZE
+LoadConfig()
+config.unlockAll = _Enabled
+UpdateToggleVisuals(true)
+
+
+task.wait(5)
+local queue_on_teleport = queue_on_teleport or function() end
+queue_on_teleport([[
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(5)
+
+-- Restore getgenv settings
+]] .. (function()
+    local env = ""
+    for k, v in pairs(getgenv()) do
+        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
+            if type(v) == "string" then
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
+            else
+                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
+            end
+        end
+    end
+    return env
+end)() .. [[
+task.wait(1)
+]])
