@@ -2344,11 +2344,6 @@ local function applyAvatar()
             local humanoid = plr.Character:FindFirstChild("Humanoid")
             if not humanoid then return end
             
-            -- Save current position
-            local root = plr.Character:FindFirstChild("HumanoidRootPart")
-            local savedCFrame = root and root.CFrame
-            local savedVelocity = root and root.Velocity
-            
             plr.CharacterAppearanceId = decodedData.id
             
             local appearance
@@ -2386,13 +2381,10 @@ local function applyAvatar()
                 end
             end
             
-            -- Restore position if we saved it
-            if savedCFrame and root then
-                root.CFrame = savedCFrame
-                root.Velocity = savedVelocity or Vector3.new(0,0,0)
-            end
+           local parent = plr.Character.Parent
+            plr.Character.Parent = nil; plr.Character.Parent = parent
             
-            replaceMyHeadshot()
+            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
             if not showAvatarOnProfile then
                 task.wait(0.3)
@@ -2429,7 +2421,7 @@ local function setupAvatar()
             
             spoofUserId()
             setupHeadshotMonitor()
-            replaceMyHeadshot()
+            replaceMyHeadshot()  -- Changed from replaceAllHeadshots
             
             if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
                 applyAvatar()
@@ -2443,7 +2435,6 @@ local function setupAvatar()
         end
     end)
 end
-
 -- ════════════════════════════════════════════════════════
 -- CHARACTER RESPAWN HANDLING
 -- ════════════════════════════════════════════════════════
