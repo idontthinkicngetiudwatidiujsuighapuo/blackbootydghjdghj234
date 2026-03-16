@@ -109,7 +109,7 @@ end
 local function smoothLoad()
     task.spawn(function()
         -- Use a tiny delay before starting to let the game stabilize
-        task.wait(0.5)
+        task.wait(1)
         
         local success, err = pcall(function()
             if typeof(loadFlags) == "function" then
