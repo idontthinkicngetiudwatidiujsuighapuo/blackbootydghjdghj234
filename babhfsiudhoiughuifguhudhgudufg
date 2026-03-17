@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerName = player.Name
 
-getgenv().skinchanger = getgenv().skinchanger or false
+getgenv().skinchanger = getgenv().skinchanger or true
 getgenv().glass = getgenv().glass or false
 getgenv().glassopacity = getgenv().glassopacity or 50
 
