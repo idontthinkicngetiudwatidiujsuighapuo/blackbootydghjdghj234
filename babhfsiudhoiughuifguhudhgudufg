@@ -1560,7 +1560,7 @@ sk_buildWeapons()
 
 -- ... all your existing skin changer code ...
 
--- Animation functions
+-animating funcccccccccccccccc
 local sk_isVisible = Flags["show skin changer"] or false
 
 -- Initial setup
@@ -1572,10 +1572,20 @@ local function sk_checkFlags()
     local shouldShow = Flags["show skin changer"]
     local shouldEnable = Flags["enable skins"]
     
+    -- Print flag values every time they change
+    if shouldShow ~= sk_isVisible then
+        print("=== FLAG CHANGED ===")
+        print("shouldShow =", shouldShow)
+        print("sk_isVisible was =", sk_isVisible)
+    end
+    
     -- Update visibility
     if shouldShow ~= sk_isVisible then
         sk_isVisible = shouldShow
         sk_ScreenGui.Enabled = shouldShow
+        
+        print("Setting sk_ScreenGui.Enabled to:", shouldShow)
+        print("Setting position to:", shouldShow and "SHOW" or "HIDE")
         
         -- Animate position
         local targetPos = shouldShow and sk_SHOW_POS or sk_HIDE_POS
@@ -1608,5 +1618,3 @@ task.spawn(function()
         sk_checkFlags()
     end
 end)
-
-print("Skin Changer loaded - Use NVHub flags to control visibility and functionality")
