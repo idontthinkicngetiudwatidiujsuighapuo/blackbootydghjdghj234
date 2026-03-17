@@ -1559,30 +1559,53 @@ end)
 sk_buildWeapons()
 
 -- Animation functions
-local sk_isVisible = Flags["show skin changer"]
+-- Animation functions
+local sk_isVisible = false
 local sk_isAnimating = false
 
 -- Flag monitoring
 local function sk_checkFlags()
-    if Flags["show skin changer"] and not sk_isVisible then
+    -- Get current flag values
+    local shouldShow = Flags["show skin changer"]
+    local shouldEnable = Flags["enable skins"]
+    
+    -- Update visibility
+    if shouldShow and not sk_isVisible then
         sk_isVisible = true
         sk_ScreenGui.Enabled = true
-        sk_MainFrame.Position = UDim2.new(0.5, 0, 0, sk_SHOW_POS)
-    elseif not Flags["show skin changer"] and sk_isVisible then
+        -- Smooth slide-in animation
+        sk_TweenService:Create(sk_MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), 
+            {Position = UDim2.new(0.5, 0, 0, sk_SHOW_POS)}):Play()
+    elseif not shouldShow and sk_isVisible then
         sk_isVisible = false
-        sk_ScreenGui.Enabled = false
-        sk_MainFrame.Position = UDim2.new(0.5, 0, 0, sk_HIDE_POS)
+        -- Smooth slide-out animation
+        sk_TweenService:Create(sk_MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), 
+            {Position = UDim2.new(0.5, 0, 0, sk_HIDE_POS)}):Play()
+        -- Delay disabling GUI until animation completes
+        task.delay(0.3, function()
+            if not sk_isVisible then
+                sk_ScreenGui.Enabled = false
+            end
+        end)
     end
     
-    local interactable = Flags["enable skins"]
+    -- Update interactability based on enable flag
+    local interactable = shouldEnable
     for _, child in ipairs(sk_MainFrame:GetDescendants()) do
         if child:IsA("TextButton") or child:IsA("TextBox") then
             child.Active = interactable
             child.Selectable = interactable
+            -- Visual feedback when disabled
+            if not interactable then
+                child.BackgroundTransparency = 0.6
+            else
+                child.BackgroundTransparency = 0
+            end
         end
     end
     
-    if not interactable then
+    -- Reset selections when skins are disabled
+    if not shouldEnable then
         sk_selectedWeapon = nil
         sk_buildWeapons()
         for _, v in ipairs(sk_SkinScroll:GetChildren()) do
@@ -1591,6 +1614,11 @@ local function sk_checkFlags()
     end
 end
 
+-- Initial setup
+sk_ScreenGui.Enabled = Flags["show skin changer"] or false
+sk_isVisible = Flags["show skin changer"] or false
+sk_MainFrame.Position = UDim2.new(0.5, 0, 0, (Flags["show skin changer"] and sk_SHOW_POS) or sk_HIDE_POS)
+
 -- Monitor flags
 task.spawn(function()
     while true do
@@ -1598,9 +1626,6 @@ task.spawn(function()
         sk_checkFlags()
     end
 end)
-
--- Set initial position
-sk_MainFrame.Position = UDim2.new(0.5, 0, 0, Flags["show skin changer"] and sk_SHOW_POS or sk_HIDE_POS)
 
 -- Auto-load skins
 task.defer(function()
@@ -1614,6 +1639,7 @@ task.defer(function()
     sk_updateAllDots()
     sk_setupGlassMonitor()
     
+    -- Persistent update loop
     while true do
         task.wait(0.5)
         if Flags["enable skins"] then
@@ -1641,7 +1667,7 @@ sk_playerGui.ChildRemoved:Connect(function()
     end
 end)
 
--- Add this function before the final print statement
+-- Persistent updates for skin icons
 local function startPersistentUpdates()
     task.spawn(function()
         while true do
