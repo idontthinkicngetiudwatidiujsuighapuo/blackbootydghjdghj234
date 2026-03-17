@@ -1868,3 +1868,61 @@ task.spawn(function()
     end
 end)
 
+--- new spoofs
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+
+local function UpdateKeys()
+    pcall(function()
+        local container = LocalPlayer:FindFirstChild("PlayerGui")
+            and LocalPlayer.PlayerGui:FindFirstChild("MainGui")
+            and LocalPlayer.PlayerGui.MainGui.MainFrame.Lobby.Currency.Container
+        
+        if container then
+            for _, v in ipairs(container:GetDescendants()) do
+                if v.Name == "Icon" and v.Image == "rbxassetid://17860673529" then
+                    local title = v.Parent.Parent:FindFirstChild("Title")
+                    if title then
+                        title.Text = tostring(getgenv().keys)
+                    end
+                end
+            end
+        end
+    end)
+end
+
+
+local function ApplyHeadless(character)
+    if not getgenv().headless then return end
+    
+    local head = character:WaitForChild("Head", 5)
+    if head then
+  
+        task.spawn(function()
+            while character and character.Parent and getgenv().headless do
+                if head.Transparency ~= 1 then
+                    head.Transparency = 1
+                end
+                local face = head:FindFirstChild("face")
+                if face then 
+                    face.Transparency = 1 
+                end
+                task.wait(0.1)
+            end
+        end)
+    end
+end
+
+
+LocalPlayer.CharacterAdded:Connect(ApplyHeadless)
+if LocalPlayer.Character then ApplyHeadless(LocalPlayer.Character) end
+
+
+task.spawn(function()
+    while task.wait(2) do
+        UpdateKeys()
+    end
+end)
