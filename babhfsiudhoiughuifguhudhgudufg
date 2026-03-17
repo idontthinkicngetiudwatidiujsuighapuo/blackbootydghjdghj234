@@ -1558,6 +1558,8 @@ end)
 -- Initialize
 sk_buildWeapons()
 
+-- ... all your existing skin changer code ...
+
 -- Animation functions
 local sk_isVisible = Flags["show skin changer"] or false
 
@@ -1606,3 +1608,5 @@ task.spawn(function()
         sk_checkFlags()
     end
 end)
+
+print("Skin Changer loaded - Use NVHub flags to control visibility and functionality")
