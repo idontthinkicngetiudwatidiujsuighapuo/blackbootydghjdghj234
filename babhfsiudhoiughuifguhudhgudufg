@@ -1559,53 +1559,38 @@ end)
 sk_buildWeapons()
 
 -- Animation functions
--- Animation functions
-local sk_isVisible = false
-local sk_isAnimating = false
+local sk_isVisible = Flags["show skin changer"] or false
+
+-- Initial setup
+sk_ScreenGui.Enabled = sk_isVisible
+sk_MainFrame.Position = UDim2.new(0.5, 0, 0, sk_isVisible and sk_SHOW_POS or sk_HIDE_POS)
 
 -- Flag monitoring
 local function sk_checkFlags()
-    -- Get current flag values
     local shouldShow = Flags["show skin changer"]
     local shouldEnable = Flags["enable skins"]
     
     -- Update visibility
-    if shouldShow and not sk_isVisible then
-        sk_isVisible = true
-        sk_ScreenGui.Enabled = true
-        -- Smooth slide-in animation
-        sk_TweenService:Create(sk_MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), 
-            {Position = UDim2.new(0.5, 0, 0, sk_SHOW_POS)}):Play()
-    elseif not shouldShow and sk_isVisible then
-        sk_isVisible = false
-        -- Smooth slide-out animation
-        sk_TweenService:Create(sk_MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), 
-            {Position = UDim2.new(0.5, 0, 0, sk_HIDE_POS)}):Play()
-        -- Delay disabling GUI until animation completes
-        task.delay(0.3, function()
-            if not sk_isVisible then
-                sk_ScreenGui.Enabled = false
-            end
-        end)
+    if shouldShow ~= sk_isVisible then
+        sk_isVisible = shouldShow
+        sk_ScreenGui.Enabled = shouldShow
+        
+        -- Animate position
+        local targetPos = shouldShow and sk_SHOW_POS or sk_HIDE_POS
+        sk_TweenService:Create(sk_MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), 
+            {Position = UDim2.new(0.5, 0, 0, targetPos)}):Play()
     end
     
-    -- Update interactability based on enable flag
-    local interactable = shouldEnable
+    -- Update interactability
     for _, child in ipairs(sk_MainFrame:GetDescendants()) do
         if child:IsA("TextButton") or child:IsA("TextBox") then
-            child.Active = interactable
-            child.Selectable = interactable
-            -- Visual feedback when disabled
-            if not interactable then
-                child.BackgroundTransparency = 0.6
-            else
-                child.BackgroundTransparency = 0
-            end
+            child.Active = shouldEnable
+            child.Selectable = shouldEnable
         end
     end
     
-    -- Reset selections when skins are disabled
-    if not shouldEnable then
+    -- Reset selections when disabled
+    if not shouldEnable and sk_selectedWeapon then
         sk_selectedWeapon = nil
         sk_buildWeapons()
         for _, v in ipairs(sk_SkinScroll:GetChildren()) do
@@ -1614,11 +1599,6 @@ local function sk_checkFlags()
     end
 end
 
--- Initial setup
-sk_ScreenGui.Enabled = Flags["show skin changer"] or false
-sk_isVisible = Flags["show skin changer"] or false
-sk_MainFrame.Position = UDim2.new(0.5, 0, 0, (Flags["show skin changer"] and sk_SHOW_POS) or sk_HIDE_POS)
-
 -- Monitor flags
 task.spawn(function()
     while true do
@@ -1626,111 +1606,3 @@ task.spawn(function()
         sk_checkFlags()
     end
 end)
-
--- Auto-load skins
-task.defer(function()
-    task.wait(1)
-    if Flags["enable skins"] then
-        for weapon, skin in pairs(sk_settings.ActiveSkins) do
-            sk_applySkin(weapon, skin, true)
-        end
-    end
-    sk_refreshSkins()
-    sk_updateAllDots()
-    sk_setupGlassMonitor()
-    
-    -- Persistent update loop
-    while true do
-        task.wait(0.5)
-        if Flags["enable skins"] then
-            sk_updateAllDots()
-            if sk_settings.GlassEnabled then
-                sk_applyGlassToViewModel()
-            end
-        end
-    end
-end)
-
--- Update when PlayerGui changes
-local sk_playerGui = sk_localPlayer:WaitForChild("PlayerGui")
-sk_playerGui.ChildAdded:Connect(function()
-    task.wait(0.5)
-    if Flags["enable skins"] then
-        sk_updateAllDots()
-    end
-end)
-
-sk_playerGui.ChildRemoved:Connect(function()
-    task.wait(0.5)
-    if Flags["enable skins"] then
-        sk_updateAllDots()
-    end
-end)
-
--- Persistent updates for skin icons
-local function startPersistentUpdates()
-    task.spawn(function()
-        while true do
-            task.wait(0.5)
-            if Flags["enable skins"] then
-                -- Reapply skins to all UI elements
-                for weapon, skin in pairs(sk_settings.ActiveSkins) do
-                    sk_updateHotbarIcon(weapon, skin)
-                    sk_updatePickWeaponsIcon(weapon, skin)
-                    sk_updateEquipmentIcon(weapon, skin)
-                end
-                
-                -- Reapply glass if enabled
-                if sk_settings.GlassEnabled then
-                    sk_applyGlassToViewModel()
-                end
-            end
-        end
-    end)
-    
-    -- Monitor for new weapons being equipped
-    task.spawn(function()
-        local playerGui = sk_localPlayer:WaitForChild("PlayerGui")
-        local function checkForNewWeapons()
-            if not Flags["enable skins"] then return end
-            
-            -- Check hotbar for new weapons
-            local hotbar = playerGui:FindFirstChild("MainGui") and 
-                          playerGui.MainGui:FindFirstChild("MainFrame") and
-                          playerGui.MainGui.MainFrame:FindFirstChild("FighterInterfaces") and
-                          playerGui.MainGui.MainFrame.FighterInterfaces:FindFirstChild(sk_playerName) and
-                          playerGui.MainGui.MainFrame.FighterInterfaces[sk_playerName]:FindFirstChild("Hotbar") and
-                          playerGui.MainGui.MainFrame.FighterInterfaces[sk_playerName].Hotbar:FindFirstChild("Container")
-            
-            if hotbar then
-                for _, weapon in pairs(hotbar:GetChildren()) do
-                    if sk_settings.ActiveSkins[weapon.Name] then
-                        sk_updateHotbarIcon(weapon.Name, sk_settings.ActiveSkins[weapon.Name])
-                    end
-                end
-            end
-        end
-        
-        while true do
-            task.wait(0.3)
-            checkForNewWeapons()
-        end
-    end)
-    
-    -- Monitor for respawn
-    task.spawn(function()
-        sk_localPlayer.CharacterAdded:Connect(function()
-            task.wait(1)
-            if Flags["enable skins"] then
-                for weapon, skin in pairs(sk_settings.ActiveSkins) do
-                    sk_applySkin(weapon, skin, true)
-                end
-            end
-        end)
-    end)
-end
-
--- Start the persistent updates
-startPersistentUpdates()
-
-print("Skin Changer loaded - Use NVHub flags to control visibility and functionality")
