@@ -1,19 +1,18 @@
 task.wait(1)
-if getgenv().showSkinChanger == nil then
-    getgenv().showSkinChanger = false
-end
-if getgenv().enableSkins == nil then
-    getgenv().enableSkins = false
-end
 
-
+-- Get the Flags table
 Flags = Flags or _G.Flags or getgenv().Flags or {}
 
-getgenv().showSkinChanger = Flags["show skin changer"] or getgenv().showSkinChanger
-getgenv().enableSkins = Flags["enable skins"] or getgenv().enableSkins
+-- Initialize getgenv values from Flags FIRST (respect what user toggled)
+getgenv().showSkinChanger = Flags["show skin changer"] or false
+getgenv().enableSkins = Flags["enable skins"] or false
 
+-- Then make sure Flags has the values
 Flags["show skin changer"] = getgenv().showSkinChanger
 Flags["enable skins"] = getgenv().enableSkins
+
+-- Debug print
+print("Skin Changer - show:", getgenv().showSkinChanger, "enable:", getgenv().enableSkins)
 task.wait(1)
 -- Configuration
 local sk_UI_NAME = "SkinChanger"
