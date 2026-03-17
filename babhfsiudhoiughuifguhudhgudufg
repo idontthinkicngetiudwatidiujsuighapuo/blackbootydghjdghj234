@@ -23,6 +23,7 @@ local function detectExecutor()
     local executors = {
         ["jjsploit"] = true,
         ["solara"] = true,
+        ["Isaeva"] = true,
         ["xeno"] = true
     }
     
