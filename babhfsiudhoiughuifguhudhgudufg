@@ -5,13 +5,18 @@
 task.wait(3)
 
 -- Use NVHub's existing Flags table (REMOVED "local" so it uses the global one)
+-- Initialize getgenv flags
+getgenv().showSkinChanger = getgenv().showSkinChanger or false
+getgenv().enableSkins = getgenv().enableSkins or false
+
+-- Keep Flags table for compatibility with rest of script
 Flags = Flags or _G.Flags or getgenv().Flags or {}
-if not Flags["show skin changer"] then Flags["show skin changer"] = false end
-if not Flags["enable skins"] then Flags["enable skins"] = false end
+Flags["show skin changer"] = getgenv().showSkinChanger
+Flags["enable skins"] = getgenv().enableSkins
 
 -- Only show message but still load core functions
-if not Flags["show skin changer"] then 
-    print("Skin Changer loaded - Enable 'show skin changer' flag to show UI")
+if not getgenv().showSkinChanger then 
+    print("Skin Changer loaded - Set getgenv().showSkinChanger = true to show UI")
 end
 
 -- Configuration
