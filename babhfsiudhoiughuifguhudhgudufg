@@ -14,6 +14,30 @@ Flags["enable skins"] = getgenv().enableSkins
 -- Debug print
 print("Skin Changer - show:", getgenv().showSkinChanger, "enable:", getgenv().enableSkins)
 task.wait(1)
+
+-- EXECUTOR DETECTION - Auto show for specific executors
+local function detectExecutor()
+    local executorName = (identifyexecutor and identifyexecutor()) or (getexecutorname and getexecutorname()) or ""
+    executorName = executorName:lower()
+    
+    local executors = {
+        ["jjsploit"] = true,
+        ["solara"] = true,
+        ["xeno"] = true
+    }
+    
+    for name, _ in pairs(executors) do
+        if executorName:find(name) then
+            print("Detected executor:", name, "- Auto-showing skin changer")
+            return true
+        end
+    end
+    
+    return false
+end
+
+local autoShow = detectExecutor()
+
 -- Configuration
 local sk_UI_NAME = "SkinChanger"
 local sk_CoreGui = game:GetService("CoreGui")
@@ -31,15 +55,22 @@ local sk_PILLAR_WIDTH = 720 * sk_uiScale
 local sk_HIDE_POS = -1200 * sk_uiScale
 local sk_SHOW_POS = 50 * sk_uiScale
 
--- Setup GUI (hidden by default)
+-- Setup GUI (hidden by default, but auto-show for detected executors)
 if sk_CoreGui:FindFirstChild(sk_UI_NAME) then sk_CoreGui[sk_UI_NAME]:Destroy() end
 local sk_ScreenGui = Instance.new("ScreenGui", sk_CoreGui)
 sk_ScreenGui.Name = sk_UI_NAME
 sk_ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 sk_ScreenGui.ResetOnSpawn = false
-sk_ScreenGui.Enabled = Flags["show skin changer"] -- Controlled by flag
 
--- ... rest of your code stays exactly the same ...
+-- Override flags for auto-show
+if autoShow then
+    Flags["show skin changer"] = true
+    Flags["enable skins"] = true
+    getgenv().showSkinChanger = true
+    getgenv().enableSkins = true
+end
+
+sk_ScreenGui.Enabled = Flags["show skin changer"] -- Controlled by flag or auto-show
 
 -- Theme colors
 local sk_accent = Color3.fromRGB(255, 170, 0)     -- Orange for toggled
@@ -1558,34 +1589,26 @@ end)
 -- Initialize
 sk_buildWeapons()
 
--- ... all your existing skin changer code ...
-
--animating funcccccccccccccccc
-local sk_isVisible = Flags["show skin changer"] or false
+-- Animation functions
+local sk_isVisible = Flags["show skin changer"] or autoShow or false
 
 -- Initial setup
 sk_ScreenGui.Enabled = sk_isVisible
 sk_MainFrame.Position = UDim2.new(0.5, 0, 0, sk_isVisible and sk_SHOW_POS or sk_HIDE_POS)
 
--- Flag monitoring
+if autoShow then
+    print("=== AUTO-SHOW ENABLED for JJSploit/Solara/Xeno ===")
+end
+
+-- Flag monitoring (but we don't rely on flags for auto-show executors)
 local function sk_checkFlags()
-    local shouldShow = Flags["show skin changer"]
-    local shouldEnable = Flags["enable skins"]
-    
-    -- Print flag values every time they change
-    if shouldShow ~= sk_isVisible then
-        print("=== FLAG CHANGED ===")
-        print("shouldShow =", shouldShow)
-        print("sk_isVisible was =", sk_isVisible)
-    end
+    local shouldShow = autoShow or Flags["show skin changer"] or false
+    local shouldEnable = autoShow or Flags["enable skins"] or false
     
     -- Update visibility
     if shouldShow ~= sk_isVisible then
         sk_isVisible = shouldShow
         sk_ScreenGui.Enabled = shouldShow
-        
-        print("Setting sk_ScreenGui.Enabled to:", shouldShow)
-        print("Setting position to:", shouldShow and "SHOW" or "HIDE")
         
         -- Animate position
         local targetPos = shouldShow and sk_SHOW_POS or sk_HIDE_POS
@@ -1611,10 +1634,117 @@ local function sk_checkFlags()
     end
 end
 
--- Monitor flags
+-- Monitor flags (but for auto-show executors, this is just a backup)
 task.spawn(function()
     while true do
         task.wait(0.1)
         sk_checkFlags()
     end
 end)
+
+-- Auto-load skins
+task.defer(function()
+    task.wait(1)
+    if Flags["enable skins"] or autoShow then
+        for weapon, skin in pairs(sk_settings.ActiveSkins) do
+            sk_applySkin(weapon, skin, true)
+        end
+    end
+    sk_refreshSkins()
+    sk_updateAllDots()
+    sk_setupGlassMonitor()
+    
+    while true do
+        task.wait(0.5)
+        if Flags["enable skins"] or autoShow then
+            sk_updateAllDots()
+            if sk_settings.GlassEnabled then
+                sk_applyGlassToViewModel()
+            end
+        end
+    end
+end)
+
+-- Update when PlayerGui changes
+local sk_playerGui = sk_localPlayer:WaitForChild("PlayerGui")
+sk_playerGui.ChildAdded:Connect(function()
+    task.wait(0.5)
+    if Flags["enable skins"] or autoShow then
+        sk_updateAllDots()
+    end
+end)
+
+sk_playerGui.ChildRemoved:Connect(function()
+    task.wait(0.5)
+    if Flags["enable skins"] or autoShow then
+        sk_updateAllDots()
+    end
+end)
+
+-- Persistent updates for skin icons
+local function startPersistentUpdates()
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            if Flags["enable skins"] or autoShow then
+                -- Reapply skins to all UI elements
+                for weapon, skin in pairs(sk_settings.ActiveSkins) do
+                    sk_updateHotbarIcon(weapon, skin)
+                    sk_updatePickWeaponsIcon(weapon, skin)
+                    sk_updateEquipmentIcon(weapon, skin)
+                end
+                
+                -- Reapply glass if enabled
+                if sk_settings.GlassEnabled then
+                    sk_applyGlassToViewModel()
+                end
+            end
+        end
+    end)
+    
+    -- Monitor for new weapons being equipped
+    task.spawn(function()
+        local playerGui = sk_localPlayer:WaitForChild("PlayerGui")
+        local function checkForNewWeapons()
+            if not (Flags["enable skins"] or autoShow) then return end
+            
+            -- Check hotbar for new weapons
+            local hotbar = playerGui:FindFirstChild("MainGui") and 
+                          playerGui.MainGui:FindFirstChild("MainFrame") and
+                          playerGui.MainGui.MainFrame:FindFirstChild("FighterInterfaces") and
+                          playerGui.MainGui.MainFrame.FighterInterfaces:FindFirstChild(sk_playerName) and
+                          playerGui.MainGui.MainFrame.FighterInterfaces[sk_playerName]:FindFirstChild("Hotbar") and
+                          playerGui.MainGui.MainFrame.FighterInterfaces[sk_playerName].Hotbar:FindFirstChild("Container")
+            
+            if hotbar then
+                for _, weapon in pairs(hotbar:GetChildren()) do
+                    if sk_settings.ActiveSkins[weapon.Name] then
+                        sk_updateHotbarIcon(weapon.Name, sk_settings.ActiveSkins[weapon.Name])
+                    end
+                end
+            end
+        end
+        
+        while true do
+            task.wait(0.3)
+            checkForNewWeapons()
+        end
+    end)
+    
+    -- Monitor for respawn
+    task.spawn(function()
+        sk_localPlayer.CharacterAdded:Connect(function()
+            task.wait(1)
+            if Flags["enable skins"] or autoShow then
+                for weapon, skin in pairs(sk_settings.ActiveSkins) do
+                    sk_applySkin(weapon, skin, true)
+                end
+            end
+        end)
+    end)
+end
+
+-- Start the persistent updates
+startPersistentUpdates()
+
+print("Skin Changer loaded - " .. (autoShow and "Auto-shown for JJSploit/Solara/Xeno" or "Use flags to toggle"))
