@@ -1749,3 +1749,81 @@ end
 startPersistentUpdates()
 
 print("Skin Changer loaded - " .. (autoShow and "Auto-shown for JJSploit/Solara/Xeno" or "Use flags to toggle"))
+-- GUI Repositioner - Moves UI under tasks
+task.spawn(function()
+    task.wait(2) -- Wait for GUI to load
+    
+    local function findTasksFrame(gui)
+        for _, child in pairs(gui:GetDescendants()) do
+            if child:IsA("TextLabel") and child.Text and child.Text:find("Beginner Tasks") then
+                local tasksFrame = child.Parent
+                while tasksFrame and not tasksFrame:IsA("Frame") do
+                    tasksFrame = tasksFrame.Parent
+                end
+                return tasksFrame
+            end
+        end
+        return nil
+    end
+    
+    local function repositionGUI()
+        local screenGui = sk_CoreGui:FindFirstChild(sk_UI_NAME) or sk_ScreenGui
+        if not screenGui then return end
+        
+        -- Try to find the tasks frame in CoreGui
+        local tasksFrame = nil
+        for _, gui in pairs(sk_CoreGui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                tasksFrame = findTasksFrame(gui)
+                if tasksFrame then break end
+            end
+        end
+        
+        -- Also check PlayerGui
+        if not tasksFrame then
+            local playerGui = sk_Players.LocalPlayer:FindFirstChild("PlayerGui")
+            if playerGui then
+                for _, gui in pairs(playerGui:GetChildren()) do
+                    if gui:IsA("ScreenGui") then
+                        tasksFrame = findTasksFrame(gui)
+                        if tasksFrame then break end
+                    end
+                end
+            end
+        end
+        
+        if tasksFrame and sk_MainFrame then
+            -- Position the skin changer under the tasks frame
+            local tasksAbsPos = tasksFrame.AbsolutePosition
+            local tasksAbsSize = tasksFrame.AbsoluteSize
+            local screenSize = sk_CoreGui.AbsoluteSize
+            
+            -- Calculate position (under tasks)
+            local newY = tasksAbsPos.Y + tasksAbsSize.Y + 20 -- 20 pixels gap
+            local newX = tasksAbsPos.X + (tasksAbsSize.X / 2) - (sk_PILLAR_WIDTH / 2)
+            
+            -- Ensure it stays on screen
+            newX = math.max(10, math.min(newX, screenSize.X - sk_PILLAR_WIDTH - 10))
+            
+            -- Apply new position
+            sk_MainFrame.Position = UDim2.new(0, newX, 0, newY)
+            sk_MainFrame.AnchorPoint = Vector2.new(0, 0)
+            
+            print("GUI repositioned under tasks at:", newX, newY)
+        else
+            print("Tasks frame not found, retrying...")
+            task.wait(1)
+            repositionGUI()
+        end
+    end
+    
+    -- Try to reposition initially
+    repositionGUI()
+    
+    -- Also reposition when screen resizes
+    sk_RunService.RenderStepped:Connect(function()
+        if sk_MainFrame and sk_MainFrame.Visible then
+            repositionGUI()
+        end
+    end)
+end)
