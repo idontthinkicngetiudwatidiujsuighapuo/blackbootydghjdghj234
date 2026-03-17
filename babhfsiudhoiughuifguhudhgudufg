@@ -1,44 +1,20 @@
 task.wait(1)
 
--- Get the Flags table
-Flags = Flags or _G.Flags or getgenv().Flags or {}
+-- Check for global skinchanger flag ONLY
+local autoShow = false
 
--- Initialize getgenv values from Flags FIRST (respect what user toggled)
-getgenv().showSkinChanger = Flags["show skin changer"] or false
-getgenv().enableSkins = Flags["enable skins"] or false
-
--- Then make sure Flags has the values
-Flags["show skin changer"] = getgenv().showSkinChanger
-Flags["enable skins"] = getgenv().enableSkins
-
--- Debug print
-print("Skin Changer - show:", getgenv().showSkinChanger, "enable:", getgenv().enableSkins)
-task.wait(1)
-
--- EXECUTOR DETECTION - Auto show for specific executors
-local function detectExecutor()
-    local executorName = (identifyexecutor and identifyexecutor()) or (getexecutorname and getexecutorname()) or ""
-    executorName = executorName:lower()
-    
-    local executors = {
-        ["jjsploit"] = true,
-        ["solara"] = true,
-        ["Isaeva"] = true,
-        ["xeno"] = true
-    }
-    
-    for name, _ in pairs(executors) do
-        if executorName:find(name) then
-            print("Detected executor:", name, "- Auto-showing skin changer")
-            return true
-        end
-    end
-    
-    return false
+if getgenv().skinchanger == true then
+    autoShow = true
+    print("Skin Changer - Global flag detected (getgenv().skinchanger = true)")
+else
+    print("Skin Changer - Not enabled (set getgenv().skinchanger = true to enable)")
 end
 
-local autoShow = detectExecutor()
-
+-- Force enable if autoShow is true
+if autoShow then
+    getgenv().showSkinChanger = true
+    getgenv().enableSkins = true
+end
 -- Configuration
 local sk_UI_NAME = "SkinChanger"
 local sk_CoreGui = game:GetService("CoreGui")
