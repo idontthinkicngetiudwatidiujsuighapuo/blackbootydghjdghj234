@@ -9,9 +9,7 @@ getgenv().skinchanger = getgenv().skinchanger or true
 getgenv().glass = getgenv().glass or false
 getgenv().glassopacity = getgenv().glassopacity or 80
 
--- ============================================================================
--- PASTE YOUR TABLES HERE
--- ============================================================================
+
 
 local ao = {
 ["Assault Rifle"] = {"AK-47", "AUG", "Tommy Gun", "Phoenix Rifle", "Boneclaw Rifle", "10B Visits", "AKEY-47", "Gingerbread AUG", "Glorious Assault Rifle"},
