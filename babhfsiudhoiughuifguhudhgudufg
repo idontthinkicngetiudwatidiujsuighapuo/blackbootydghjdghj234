@@ -1924,7 +1924,7 @@ task.spawn(function()
         UpdateKeys()
     end
 end)
-
+task.wait(5)
 
 -- Default values if getgenv variables aren't set
 local CONFIG = {
