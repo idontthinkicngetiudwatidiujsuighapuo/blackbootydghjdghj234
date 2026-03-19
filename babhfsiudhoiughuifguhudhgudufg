@@ -1,4 +1,12 @@
+-- OPTIMIZED START
+if getgenv().QC_SKIN_LOADED then return end
+getgenv().QC_SKIN_LOADED = true
 
+-- Cache services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -2407,5 +2415,14 @@ task.wait(2)
         task.wait(5)
         updateNametag()
     end
+end)
+
+-- OPTIMIZED END
+task.spawn(function()
+    -- Clear large tables after use
+    ao, af, an, am, ag, b, weaponToVar = nil, nil, nil, nil, nil, nil, nil
+    
+    -- Force memory cleanup if available
+    pcall(collectgarbage)
 end)
 
