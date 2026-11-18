@@ -1,0 +1,5519 @@
+repeat task.wait(0.1) until game:IsLoaded()
+
+for _, Function in ipairs({ hookfunction, hookmetamethod }) do
+	assert(Function, "unsupported executor")
+end
+
+if game.GameId ~= 6035872082 then
+	return error("wrong game", 5)
+end
+
+local Services = {}
+do
+	local ServiceCache = {}
+	setmetatable(Services, {
+		__index = function(_, service)
+			if ServiceCache[service] then
+				return ServiceCache[service]
+			end
+
+			local Ok, Result = pcall(function()
+				return cloneref(game:GetService(service))
+			end)
+
+			if not Ok or not Result then
+				Result = game:GetService(service)
+			end
+
+			ServiceCache[service] = Result
+			return Result
+		end
+	})
+end
+
+-- // Config \\ --
+local Config = {}
+do
+	Config.MainFolder = "ascida"
+
+	Config.Files = {
+		Skins = "ascida/configs/skins.json",
+		Spoofs = "ascida/configs/spoofs.json",
+		UI = "ascida/configs/ui.json",
+	}
+
+	local function EnsureFolders()
+		if not isfolder("ascida") then
+			makefolder("ascida")
+		end
+		if not isfolder("ascida/configs") then
+			makefolder("ascida/configs")
+		end
+		if not isfolder("ascida/sounds") then
+			makefolder("ascida/sounds")
+		end
+		if not isfolder("ascida/wraps") then
+			makefolder("ascida/wraps")
+		end
+	end
+
+	EnsureFolders()
+
+	Config.Save = function(File, Content)
+		EnsureFolders()
+		local Ok, Json = pcall(function()
+			return Services.HttpService:JSONEncode(Content)
+		end)
+		if Ok then
+			pcall(function()
+				writefile(File, Json)
+			end)
+		end
+	end
+
+	Config.Read = function(File)
+		if not isfile(File) then
+			return {}
+		end
+		local Ok, Data = pcall(function()
+			return Services.HttpService:JSONDecode(readfile(File))
+		end)
+		return (Ok and Data) or {}
+	end
+end
+
+-- // Server \\ --
+local Server = {}
+do
+	Server.URL = "https://ascida-sync-2-default-rtdb.firebaseio.com/"
+	Server.Storage = {}
+
+	Server.GenerateSessionKey = function()
+		local RNG = Random.new(tick())
+		local Chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+		local Key = ""
+		for _ = 1, 10 do
+			local RandIdx = RNG:NextInteger(1, #Chars)
+			Key = Key .. Chars:sub(RandIdx, RandIdx)
+		end
+		return Key
+	end
+
+	Server.MySessionKey = Server.GenerateSessionKey()
+
+	Server.SendPayload = function(File, Payload)
+		pcall((syn and syn.request) or (http and http.request) or http_request or request, {
+			Url = Server.URL .. tostring(File),
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = Services.HttpService:JSONEncode(Payload),
+		})
+	end
+
+	Server.Catch = function(File)
+		local Success, Result = pcall((syn and syn.request) or (http and http.request) or http_request or request, {
+			Url = Server.URL .. tostring(File),
+			Method = "GET",
+			Headers = { ["Content-Type"] = "application/json" },
+		})
+
+		if Success then
+			return Services.HttpService:JSONDecode(Result.Body)
+		end
+	end
+end
+
+-- // API \\ --
+local API = {}
+do
+	local LocalPlayer = Services.Players.LocalPlayer
+	local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+
+	local Library = {
+		CosmeticLibrary = require(Services.ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CosmeticLibrary")),
+		ItemLibrary = require(Services.ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemLibrary")),
+		EnumLibrary = require(Services.ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnumLibrary")),
+		SeasonLibrary = require(Services.ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SeasonLibrary")),
+		PlayerDataController = require(PlayerScripts:WaitForChild("Controllers"):WaitForChild("PlayerDataController")),
+		Notifications = require(
+			PlayerScripts:WaitForChild("Modules"):WaitForChild("UserInterface"):WaitForChild("Notifications")
+		),
+		PickWeapons = require(PlayerScripts:WaitForChild("Modules"):WaitForChild("Pages"):WaitForChild("PickWeapons")),
+	}
+
+	Library.FighterController, Library.EmoteController = nil, nil
+
+	task.spawn(function()
+		local FC = PlayerScripts.Controllers:FindFirstChild("FighterController")
+		if FC then
+			pcall(function()
+				Library.FighterController = require(FC)
+			end)
+		end
+	end)
+
+	task.spawn(function()
+		local EC = PlayerScripts.Controllers:FindFirstChild("EmoteController")
+		if EC then
+			pcall(function()
+				Library.EmoteController = require(EC)
+			end)
+		end
+	end)
+
+	API.Library = Library
+	API.SavedEquip = nil
+	API.SavedFavorite = nil
+
+	local EquipRemote, FavoriteRemote, EquipEmote =
+		Services.ReplicatedStorage.Remotes.Data:WaitForChild("EquipCosmetic"),
+		Services.ReplicatedStorage.Remotes.Data:WaitForChild("FavoriteCosmetic"),
+		Services.ReplicatedStorage.Remotes.Data:WaitForChild("EquipEmote")
+
+	local GameComparatorHooks = {}
+	local OnlyUseFavorites = {}
+	local CustomWrapEnabled = false
+	local WrapController = nil
+	local WrapTextures = nil
+	local OriginalGetUnlockedWeapons, OriginalGetWeaponData, HookedGetWeaponData = nil, nil, nil
+
+	local Equipped, Favorited, FakeHistory, UnlockedItems, UnlockedWeapons, UnlockAll, SeasonBundle, EquippedSlot, EquippedEmote, AttributeConnections =
+		{}, {}, {}, {}, {}, false, nil, nil, nil, {}
+
+	local CloneCosmetic = function(CosmeticName, CosmeticType, Options)
+		local Base = Library.CosmeticLibrary.Cosmetics[CosmeticName]
+
+		if not Base then
+			return nil
+		end
+
+		local Cloned = {}
+		for K, V in pairs(Base) do
+			Cloned[K] = V
+		end
+
+		Cloned.Name = CosmeticName
+		Cloned.Type = Cloned.Type or CosmeticType
+		Cloned.Seed = math.random(1, 1000000)
+		Cloned.Inverted = Options and Options.IsInverted or false
+
+		if Options and Options.OnlyUseFavorites then
+			Cloned.OnlyUseFavorites = true
+		end
+
+		if Options and Options.isRandom then
+			Cloned.isRandom = true
+		end
+
+		pcall(function()
+			local EnumId = Library.EnumLibrary:ToEnum(CosmeticName)
+			if EnumId then
+				Cloned.Enum, Cloned.ObjectID = EnumId, EnumId
+			end
+		end)
+
+		return Cloned
+	end
+
+	API.Notify = function(Title, Content, Silent)
+		Library.Notifications:Queue(Title, Content, nil, nil, 1, nil, Silent == nil and true or Silent)
+	end
+
+	API.Replicate = function(Str)
+		pcall(function()
+			Library.PlayerDataController.CurrentData:Replicate(Str or "WeaponInventory")
+		end)
+	end
+
+	API.SetAttribute = function(Attribute, Value, AlwaysStay)
+		LocalPlayer:SetAttribute(Attribute, Value)
+
+		if AlwaysStay then
+			if AttributeConnections[Attribute] then
+				AttributeConnections[Attribute]:Disconnect()
+			end
+
+			AttributeConnections[Attribute] = LocalPlayer:GetAttributeChangedSignal(Attribute):Connect(function()
+				if LocalPlayer:GetAttribute(Attribute) ~= Value then
+					LocalPlayer:SetAttribute(Attribute, Value)
+				end
+			end)
+		end
+	end
+
+	API.OwnsCosmetic = function(Name)
+		if UnlockAll then
+			return true
+		end
+		return UnlockedItems[Name] == true
+	end
+
+	API.Equip = function(WeaponName, CosmeticType, CosmeticName, Options)
+		local Cloned = CloneCosmetic(CosmeticName, CosmeticType, Options)
+		if not Cloned then
+			return
+		end
+
+		Equipped[WeaponName] = Equipped[WeaponName] or {}
+		Equipped[WeaponName][CosmeticType] = Cloned
+		API.Replicate()
+	end
+
+	API.OnlyEquipSpecificCosmetic = function(WeaponName, CosmeticType, AllowedName, Options)
+		if not AllowedName then
+			return
+		end
+		API.Equip(WeaponName, CosmeticType, AllowedName, Options)
+	end
+
+	API.Unequip = function(WeaponName, CosmeticType)
+		if not Equipped[WeaponName] then
+			return
+		end
+		Equipped[WeaponName][CosmeticType] = nil
+		if not next(Equipped[WeaponName]) then
+			Equipped[WeaponName] = nil
+		end
+		API.Replicate()
+	end
+
+	API.UnequipAll = function(WeaponName)
+		Equipped[WeaponName] = nil
+		API.Replicate()
+	end
+
+	API.Reset = function()
+		Equipped = {}
+		Favorited = {}
+		API.Replicate()
+	end
+
+	API.SpoofOwnsCosmetics = function(Value)
+		if not CosmeticLib then
+			return
+		end
+		for _, FnName in ipairs({
+			"OwnsCosmetic",
+			"OwnsCosmeticUniversally",
+			"OwnsCosmeticNormally",
+			"OwnsCosmeticForWeapon",
+			"OwnsCosmeticForSomething",
+		}) do
+			pcall(function()
+				CosmeticLib[FnName] = function(Self, Inv, Name)
+					if typeof(Value) == "boolean" then
+						return Value
+					elseif typeof(Value) == "function" then
+						return Value(Name)
+					end
+				end
+			end)
+		end
+	end
+
+	API.Restore = function()
+		if API.SavedEquip then
+			Equipped = API.SavedEquip
+		end
+
+		if API.SavedFavorite then
+			Favorited = API.SavedFavorite
+		end
+	end
+
+	API.UnlockCosmetics = function()
+		API.Restore()
+
+		for _, Rarity in ipairs({ "Mythical", "Legendary", "Epic", "Rare", "Common", "Unique" }) do
+			API.UnlockCosmeticsByRarity(Rarity)
+		end
+
+		API.Replicate("CosmeticInventory")
+		API.Replicate()
+	end
+
+	API.LockCosmetics = function()
+		API.SavedEquip = Equipped
+		API.SavedFavorite = Favorited
+		API.Reset()
+
+		for _, Rarity in ipairs({ "Mythical", "Legendary", "Epic", "Rare", "Common", "Unique" }) do
+			API.LockCosmeticsByRarity(Rarity)
+		end
+
+		API.Replicate("CosmeticInventory")
+		API.Replicate()
+	end
+
+	API.UnlockSpecificCosmetic = function(CosmeticName)
+		UnlockedItems[CosmeticName] = true
+
+		API.Replicate()
+	end
+
+	API.LockSpecificCosmetic = function(CosmeticName)
+		UnlockedItems[CosmeticName] = nil
+
+		API.Replicate()
+	end
+
+	API.UnlockRankCharm = function(Charm, Season)
+		Season = Season or "Season 1"
+
+		local CharmsPath = LocalPlayer.PlayerScripts.Assets.Charms[Season].Extra
+
+		local DestinationRanks = {
+			"Unranked",
+			"Bronze 1",
+			"Bronze 2",
+			"Bronze 3",
+			"Silver 1",
+			"Silver 2",
+			"Silver 3",
+			"Gold 1",
+			"Gold 2",
+			"Gold 3",
+			"Platinum 1",
+			"Platinum 2",
+			"Platinum 3",
+			"Diamond 1",
+			"Diamond 2",
+			"Diamond 3",
+			"Onyx 1",
+			"Onyx 2",
+			"Onyx 3",
+			"Nemesis",
+		}
+
+		local BackupFolder = LocalPlayer.PlayerScripts.Assets.Charms:FindFirstChild("__Backup__" .. Season)
+		if not BackupFolder then
+			BackupFolder = Instance.new("Folder")
+			BackupFolder.Name = "__Backup__" .. Season
+			BackupFolder.Parent = LocalPlayer.PlayerScripts.Assets.Charms
+
+			for _, Rank in ipairs(DestinationRanks) do
+				local DestFolder = CharmsPath[Rank]
+				if DestFolder then
+					local RankBackup = Instance.new("Folder")
+					RankBackup.Name = Rank
+					RankBackup.Parent = BackupFolder
+					for _, Child in pairs(DestFolder:GetChildren()) do
+						Child:Clone().Parent = RankBackup
+					end
+				end
+			end
+		end
+
+		for _, Rank in ipairs(DestinationRanks) do
+			local DestFolder = CharmsPath[Rank]
+			if DestFolder then
+				local RankBackup = BackupFolder:FindFirstChild(Rank)
+				for _, Child in pairs(DestFolder:GetChildren()) do
+					Child:Destroy()
+				end
+				if RankBackup then
+					for _, Child in pairs(RankBackup:GetChildren()) do
+						Child:Clone().Parent = DestFolder
+					end
+				end
+			end
+		end
+
+		local SourceFolder = CharmsPath[Charm]
+		if not SourceFolder then
+			return
+		end
+
+		for _, Rank in ipairs(DestinationRanks) do
+			local DestFolder = CharmsPath[Rank]
+			if DestFolder then
+				for _, Child in pairs(DestFolder:GetChildren()) do
+					Child:Destroy()
+				end
+				for _, Child in pairs(SourceFolder:GetChildren()) do
+					local Cloned = Child:Clone()
+					Cloned.Parent = DestFolder
+					if Cloned.Name == "Rank" then
+						local SurfaceGui = Cloned:FindFirstChild("SurfaceGui")
+						if SurfaceGui then
+							local Label = SurfaceGui:FindFirstChild("TextLabel")
+							if Label then
+								Label.Text = Rank
+							end
+						end
+					end
+				end
+				Library.SeasonLibrary:FormatSeasonRankCharm(DestFolder, DestFolder, Season, nil, 2)
+			end
+		end
+
+		API.Replicate()
+	end
+
+	API.HookWeaponData = function()
+		pcall(function()
+			OriginalGetWeaponData = Library.PlayerDataController.GetWeaponData
+
+			Library.PlayerDataController.GetWeaponData = function(Self, WeaponName)
+				if not WeaponName or tostring(WeaponName) == "nil" then
+					return
+				end
+				local WeaponData = { Unlocked = true, Level = 1, XP = 1 }
+
+				local Ok, Original = pcall(OriginalGetWeaponData, Self, WeaponName)
+				if Ok and Original then
+					for K, V in pairs(Original) do
+						if K ~= "Unlocked" and K ~= "Level" and K ~= "XP" then
+							WeaponData[K] = V
+						end
+					end
+				end
+
+				if Equipped and Equipped[WeaponName] then
+					for CosmeticType, CosmeticData in pairs(Equipped[WeaponName]) do
+						WeaponData[CosmeticType] = CosmeticData
+					end
+				end
+
+				return WeaponData
+			end
+
+			HookedGetWeaponData = Library.PlayerDataController.GetWeaponData
+		end)
+	end
+
+	API.UnlockWeapons = function()
+		if not OriginalGetUnlockedWeapons then
+			OriginalGetUnlockedWeapons = Library.PlayerDataController.GetUnlockedWeapons
+		end
+
+		Library.PlayerDataController.GetUnlockedWeapons = function()
+			local Items = {}
+			for Name in pairs(Library.ItemLibrary.Items) do
+				Items[Name] = true
+			end
+			return Items
+		end
+
+		if HookedGetWeaponData then
+			Library.PlayerDataController.GetWeaponData = HookedGetWeaponData
+		end
+
+		pcall(function()
+			API.Replicate("WeaponInventory")
+		end)
+	end
+
+	API.LockWeapons = function()
+		if OriginalGetUnlockedWeapons then
+			Library.PlayerDataController.GetUnlockedWeapons = OriginalGetUnlockedWeapons
+		end
+
+		if OriginalGetWeaponData then
+			Library.PlayerDataController.GetWeaponData = OriginalGetWeaponData
+		end
+
+		pcall(function()
+			API.Replicate("WeaponInventory")
+		end)
+	end
+
+	API.SwapWeaponsWithUnobtainable = function(Weapon, Unobtainable)
+		local VM = Library.ItemLibrary.ViewModels
+		local Items = Library.ItemLibrary.Items
+
+		local Target = VM[Weapon]
+		local Cosmetic = VM[Unobtainable]
+		local TargetItem = Items[Weapon]
+		local CosmeticItem = Items[Unobtainable]
+
+		if Target and Cosmetic then
+			Target.Image = Cosmetic.Image
+			Target.ImageHighResolution = Cosmetic.ImageHighResolution
+			Target.EliminationFeedImage = Cosmetic.EliminationFeedImage
+			Target.RootPartOffset = Cosmetic.RootPartOffset
+
+			for AnimKey, AnimValue in pairs(Cosmetic.Animations or {}) do
+				Target.Animations[AnimKey] = AnimValue
+			end
+		end
+
+		if TargetItem and CosmeticItem then
+			for K, V in pairs(CosmeticItem) do
+				TargetItem[K] = V
+			end
+			TargetItem.Name = Weapon
+		end
+
+		local Spoofs = Config.Read(Config.Files.Spoofs)
+		Spoofs["SwapWeaponsWithUnobtainable"] = Spoofs["SwapWeaponsWithUnobtainable"] or {}
+		Spoofs["SwapWeaponsWithUnobtainable"][Weapon] = Unobtainable
+		Config.Save(Config.Files.Spoofs, Spoofs)
+
+		local ViewModels = PlayerScripts.Assets.ViewModels.Weapons
+		local WeaponModel = ViewModels:FindFirstChild(Weapon)
+		local UnobtainableModel = PlayerScripts.Assets.ViewModels.Weapons.Unobtainable:FindFirstChild(Unobtainable)
+
+		if WeaponModel and UnobtainableModel then
+			local Cloned = UnobtainableModel:Clone()
+			Cloned.Parent = WeaponModel.Parent
+			WeaponModel:Destroy()
+			Cloned.Name = Weapon
+		end
+	end
+
+	API.SwapAnimations = function(Weapon, Cosmetic)
+		local Target = Library.ItemLibrary.ViewModels[Weapon]
+		local CosmeticVM = Library.ItemLibrary.ViewModels[Cosmetic]
+
+		if Target and CosmeticVM then
+			for AnimKey, AnimValue in pairs(CosmeticVM.Animations or {}) do
+				Target.Animations[AnimKey] = AnimValue
+			end
+		end
+	end
+
+	API.UnswapWeaponsWithUnobtainable = function(Weapon)
+		local Spoofs = Config.Read(Config.Files.Spoofs)
+
+		if not Spoofs["SwapWeaponsWithUnobtainable"] or not Spoofs["SwapWeaponsWithUnobtainable"][Weapon] then
+			return
+		end
+		Spoofs["SwapWeaponsWithUnobtainable"][Weapon] = nil
+
+		Config.Save(Config.Files.Spoofs, Spoofs)
+	end
+
+	API.UnlockSpecificWeapon = function(WeaponName)
+		UnlockedWeapons[WeaponName] = true
+
+		Library.PlayerDataController.GetUnlockedWeapons = function()
+			return UnlockedWeapons
+		end
+	end
+
+	API.LockSpecificWeapon = function(WeaponName)
+		UnlockedWeapons[WeaponName] = nil
+	end
+
+	API.SpoofSeasonBundle = function(Pass)
+		SeasonBundle = Pass
+	end
+
+	API.ResetSeasonBundle = function()
+		pcall(function()
+			SeasonBundle =
+				table.clone(Library.PlayerDataController:Get("Seasons"))[Library.SeasonLibrary.CurrentSeason.Name].BattlePass.MaxPassTrackNum
+		end)
+	end
+
+	API.UnlockInventory = function()
+		local OldGet = Library.PlayerDataController.Get
+		Library.PlayerDataController.Get = function(Self, Key)
+			if Key == "CosmeticInventory" then
+				local Inv = OldGet(Self, Key) or {}
+				local Merged = {}
+				for K, V in pairs(Inv) do
+					Merged[K] = V
+				end
+				for K, V in pairs(UnlockedItems) do
+					Merged[K] = V
+				end
+				if UnlockAll then
+					return setmetatable(Merged, {
+						__index = function()
+							return true
+						end,
+					})
+				end
+				return Merged
+			elseif Key == "FavoritedCosmetics" then
+				return Favorited
+			elseif Key == "DuelHistory" then
+				return FakeHistory
+			elseif Key == "LoggedELOEvents" then
+				return {}
+			elseif Key == "Seasons" then
+				local Result = table.clone(OldGet(Self, Key))
+				local SeasonName = Library.SeasonLibrary.CurrentSeason.Name
+				Result[SeasonName] = Result[SeasonName] or {}
+				Result[SeasonName].BattlePass = Result[SeasonName].BattlePass or {}
+				if SeasonBundle ~= nil then
+					Result[SeasonName].BattlePass.MaxPassTrackNum = SeasonBundle
+				end
+				Result[SeasonName].BattlePass.PassLevel = Library.SeasonLibrary.CurrentSeason.NumBattlePassTiers
+				Result[SeasonName].BattlePass.RewardsClaimed = Result[SeasonName].BattlePass.RewardsClaimed or {}
+				return Result
+			elseif Key == "EquippedEmotes" then
+				local Result = OldGet(Self, Key) or {}
+				if EquippedSlot and EquippedEmote then
+					Result[EquippedSlot] = { Name = EquippedEmote }
+				end
+				return Result
+			end
+			return OldGet(Self, Key)
+		end
+
+		API.Replicate()
+	end
+
+	API.GetRandom = function(WeaponName, CosmeticType)
+		if not WeaponName or WeaponName:find("MISSING_") then
+			return nil
+		end
+
+		local Pool = {}
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if Data.Type and tostring(Data.Type) == CosmeticType then
+				if Data.Type == "Skin" then
+					if Data.ItemName and Data.ItemName == WeaponName then
+						table.insert(Pool, Name)
+					end
+				else
+					table.insert(Pool, Name)
+				end
+			end
+		end
+
+		local Favorites = OnlyUseFavorites[WeaponName]
+		if Favorites then
+			local FavoritePool = {}
+			for _, Name in ipairs(Pool) do
+				if Favorites[Name] then
+					table.insert(FavoritePool, Name)
+				end
+			end
+			if #FavoritePool > 0 then
+				Pool = FavoritePool
+			end
+		end
+
+		if #Pool == 0 then
+			return nil
+		end
+
+		local Selected = Pool[math.random(1, #Pool)]
+		if not Selected then
+			return nil
+		end
+
+		local Base = Library.CosmeticLibrary.Cosmetics[Selected]
+		if not Base then
+			return nil
+		end
+
+		local Cloned = {}
+		for K, V in pairs(Base) do
+			Cloned[K] = V
+		end
+		Cloned.Name = Selected
+		Cloned.Seed = math.random(1, 9999999)
+		Cloned.Inverted = false
+
+		pcall(function()
+			local Eid = Library.EnumLibrary:ToEnum(Selected)
+			if Eid then
+				Cloned.Enum = Eid
+				Cloned.ObjectID = Eid
+			end
+		end)
+
+		return Cloned
+	end
+
+	API.EquipRandomCosmetic = function(WeaponName, CosmeticType)
+		local Pool = {}
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if tostring(Data.Type) == CosmeticType then
+				table.insert(Pool, Name)
+			end
+		end
+		if #Pool == 0 then
+			return
+		end
+		API.Equip(WeaponName, CosmeticType, Pool[math.random(1, #Pool)])
+	end
+
+	API.EquipAllRandomCosmetics = function(WeaponName)
+		for _, CosmeticType in ipairs({ "Skin", "Wrap", "Charm", "Finisher" }) do
+			API.EquipRandomCosmetic(WeaponName, CosmeticType)
+		end
+	end
+
+	API.EquipRandomCosmeticsAllWeapons = function(CosmeticType)
+		for WeaponName in pairs(Library.ItemLibrary.Items) do
+			API.EquipRandomCosmetic(WeaponName, CosmeticType)
+		end
+	end
+
+	API.UnlockRandomCosmetics = function(Count, CosmeticType)
+		local Pool = {}
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if not CosmeticType or tostring(Data.Type) == CosmeticType then
+				table.insert(Pool, Name)
+			end
+		end
+		local Unlocked = 0
+		local LastName = nil
+		while Unlocked < Count and #Pool > 0 do
+			local Idx = math.random(1, #Pool)
+			local Name = Pool[Idx]
+			UnlockedItems[Name] = true
+			LastName = Name
+			table.remove(Pool, Idx)
+			Unlocked += 1
+		end
+		API.Replicate()
+		return LastName
+	end
+
+	API.LockRandomCosmetics = function(Count, CosmeticType)
+		local Pool = {}
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if not CosmeticType or tostring(Data.Type) == CosmeticType then
+				table.insert(Pool, Name)
+			end
+		end
+		local Locked = 0
+		while Locked < Count and #Pool > 0 do
+			local Idx = math.random(1, #Pool)
+			UnlockedItems[Pool[Idx]] = nil
+			table.remove(Pool, Idx)
+			Locked += 1
+		end
+		API.Replicate()
+	end
+
+	API.CreateCosmetic = function(type, name, args)
+		if Library.CosmeticLibrary.Cosmetics[name] then
+			return getgenv().UI.Notify("Ascida", "Cosmetic with this name already exists: " .. name, true)
+		end
+
+		local function addOwnership(cosmeticName)
+			local oldOwnsCosmetic = Library.CosmeticLibrary.OwnsCosmetic
+			Library.CosmeticLibrary.OwnsCosmetic = function(self, playerData, cName, weaponName)
+				if cName == cosmeticName then
+					return true
+				end
+				return oldOwnsCosmetic(self, playerData, cName, weaponName)
+			end
+
+			local oldOwnsCosmeticNormally = Library.CosmeticLibrary.OwnsCosmeticNormally
+			Library.CosmeticLibrary.OwnsCosmeticNormally = function(self, playerData, cName)
+				if cName == cosmeticName then
+					return true
+				end
+				return oldOwnsCosmeticNormally(self, playerData, cName)
+			end
+		end
+
+		if type == "Wrap" then
+			local color1 = args.color1 or Color3.fromRGB(255, 255, 255)
+			local color2 = args.color2 or Color3.fromRGB(17, 17, 17)
+			local color3 = args.color3 or color1
+			local rarity = args.rarity or "Unobtainable"
+			local description = args.description or name .. " wrap"
+
+			Library.CosmeticLibrary.Cosmetics[name] = {
+				["Rarity"] = rarity,
+				["Type"] = "Wrap",
+				["Image"] = "",
+				["ImageScale"] = 1,
+				["Hidden"] = rarity == "Unobtainable" and true or nil,
+				["Description"] = description,
+				["DescriptionSpecific"] = nil,
+				["GetDescription"] = function()
+					return description
+				end,
+				["WrapGroups"] = {
+					{
+						Material = args.wrap1 or Enum.Material.SmoothPlastic,
+						MaterialVariant = "",
+						Color = color1,
+						Transparency = 0,
+						Reflectance = 0,
+					},
+					{
+						Material = args.wrap2 or Enum.Material.SmoothPlastic,
+						MaterialVariant = "",
+						Color = color2,
+						Transparency = 0,
+						Reflectance = 0,
+					},
+					{
+						Material = args.wrap3 or Enum.Material.Neon,
+						MaterialVariant = "",
+						Color = color3,
+						Transparency = 0,
+						Reflectance = 0,
+					},
+				},
+			}
+
+			table.insert(Library.CosmeticLibrary.CosmeticsAlphabetized, name)
+			addOwnership(name)
+			getgenv().UI.Notify("Ascida", "Skin created: " .. name)
+		elseif type == "Skin" then
+			local weaponName = args.weaponName
+			local rarity = args.rarity or "Unobtainable"
+			local description = args.description or name .. " skin"
+
+			local viewModel = Library.ItemLibrary.ViewModels[name]
+
+			Library.CosmeticLibrary.Cosmetics[name] = {
+				["Rarity"] = rarity,
+				["Type"] = "Skin",
+				["Image"] = viewModel and viewModel.Image
+					or Library.ItemLibrary.ViewModels[weaponName] and Library.ItemLibrary.ViewModels[weaponName].Image
+					or "",
+				["ImageScale"] = 3,
+				["Hidden"] = rarity == "Unobtainable" and true or nil,
+				["Description"] = description,
+				["DescriptionSpecific"] = nil,
+				["GetDescription"] = function()
+					return description
+				end,
+				["ItemName"] = weaponName,
+				["ImageHighResolution"] = viewModel and viewModel.ImageHighResolution or nil,
+				["CustomModel"] = args.customModel or nil,
+			}
+
+			table.insert(Library.CosmeticLibrary.CosmeticsAlphabetized, name)
+			addOwnership(name)
+			getgenv().UI.Notify("Ascida", "Skin created: " .. name)
+		end
+	end
+
+	API.UnlockCosmeticsByRarity = function(Rarity, Type)
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if Type then
+				if tostring(Data.Rarity) == Rarity and tostring(Data.Type) == Type then
+					UnlockedItems[Name] = true
+				end
+			else
+				if tostring(Data.Rarity) == Rarity then
+					UnlockedItems[Name] = true
+				end
+			end
+		end
+		API.Replicate()
+	end
+
+	API.LockCosmeticsByRarity = function(Rarity, Type)
+		for Name, Data in pairs(Library.CosmeticLibrary.Cosmetics) do
+			if Type then
+				if tostring(Data.Rarity) == Rarity and tostring(Data.Type) == Type then
+					UnlockedItems[Name] = nil
+				end
+			else
+				if tostring(Data.Rarity) == Rarity then
+					UnlockedItems[Name] = nil
+				end
+			end
+		end
+		API.Replicate()
+	end
+
+	do
+		local ArmSystem = { Connection = nil, Modified = {} }
+
+		local function ApplyArm(Obj)
+			if Obj:IsA("BasePart") and (Obj.Name == "RightArm" or Obj.Name == "LeftArm") then
+				if not ArmSystem.Modified[Obj] then
+					ArmSystem.Modified[Obj] = {
+						Transparency = Obj.Transparency,
+						CanCollide = Obj.CanCollide,
+						Anchored = Obj.Anchored,
+					}
+				end
+				Obj.Transparency = 1
+				Obj.CanCollide = false
+				Obj.Anchored = true
+			end
+		end
+
+		local function RestoreArms()
+			for Obj, Data in pairs(ArmSystem.Modified) do
+				if Obj and Obj.Parent then
+					Obj.Transparency = Data.Transparency
+					Obj.CanCollide = Data.CanCollide
+					Obj.Anchored = Data.Anchored
+				end
+			end
+			ArmSystem.Modified = {}
+		end
+
+		API.ArmsVisible = function(Enabled)
+			if Enabled then
+				for _, Obj in ipairs(workspace:GetDescendants()) do
+					ApplyArm(Obj)
+				end
+				if ArmSystem.Connection then
+					ArmSystem.Connection:Disconnect()
+				end
+				ArmSystem.Connection = workspace.DescendantAdded:Connect(ApplyArm)
+			else
+				RestoreArms()
+				if ArmSystem.Connection then
+					ArmSystem.Connection:Disconnect()
+					ArmSystem.Connection = nil
+				end
+			end
+		end
+	end
+
+	API.SpoofDuelHistory = function(History)
+		FakeHistory = History
+	end
+
+	API.ResetDuelHistory = function()
+		FakeHistory = nil
+	end
+
+	API.UnlockCosmeticsByType = function(CosmeticType)
+		for Name, Data in pairs(Library.CosmeticLibraryCosmetics) do
+			if tostring(Data.Type) == CosmeticType then
+				UnlockedItems[Name] = true
+			end
+		end
+		API.Replicate()
+	end
+
+	API.GetEquipped = function()
+		return Equipped
+	end
+
+	API.GetEquippedForWeapon = function(WeaponName)
+		return Equipped[WeaponName] or {}
+	end
+
+	API.ChangeStatusOfWeapon = function(Weapon, NewStatus)
+		Library.ItemLibrary.Items[Weapon or "Assault Rifle"].Status = NewStatus or "Standart"
+	end
+
+	API.SwapEquipped = function(New)
+		Equipped = New
+	end
+
+	API.SpoofGameComparator = function(Weapon, Value)
+		pcall(function()
+			local ComparatorPaths = {
+				["Jump Pad"] = LocalPlayer.PlayerScripts.Modules.GameComponents.JumpPads,
+			}
+
+			if not ComparatorPaths[Weapon] then
+				return
+			end
+
+			local Component = require(ComparatorPaths[Weapon])
+
+			if GameComparatorHooks[Weapon] then
+				GameComparatorHooks[Weapon].Skin = Value
+				return
+			end
+
+			local State = { Skin = Value }
+			GameComparatorHooks[Weapon] = State
+
+			local OriginalObjectAdded = clonefunction(Component._ObjectAdded)
+
+			hookfunction(
+				Component._ObjectAdded,
+				newcclosure(function(Self, P2)
+					local V2 = P2:GetAttribute("ObjectID")
+					local LocalFighter = Library.FighterController.LocalFighter
+
+					if LocalFighter and LocalFighter:GetItem(V2) ~= nil then
+						P2:SetAttribute("ViewModelName", State.Skin)
+					end
+
+					return OriginalObjectAdded(Self, P2)
+				end)
+			)
+		end)
+	end
+
+	API.CreateDialog = function(JSON)
+		pcall(function()
+			local DialogNode = require(Services.ReplicatedStorage.Modules.DialogNode)
+			local Pages = require(PlayerScripts.Modules.UserInterface.Pages)
+
+			local ImageCache = {}
+			local function GetImage(URL)
+				if not URL then
+					return nil
+				end
+				if URL:sub(1, 13) == "rbxassetid://" or URL:sub(1, 4) == "rbx:" then
+					return URL
+				end
+				if ImageCache[URL] then
+					return ImageCache[URL]
+				end
+				local Response = http_request or request({ Url = URL, Method = "GET" })
+				local FileName = "dialog_" .. tostring(#ImageCache) .. ".png"
+				writefile(FileName, Response.Body)
+				local Asset = getcustomasset(FileName)
+				ImageCache[URL] = Asset
+				return Asset
+			end
+
+			local BuildDialog
+			BuildDialog = function(Data)
+				if not Data then
+					return nil
+				end
+
+				local Node = DialogNode.new()
+
+				if Data.Message then
+					Node:SetMessage(GetImage(Data.Message.Image), Data.Message.Text, Data.Message.SoundID)
+				end
+
+				if Data.ButtonAppearDelay then
+					Node:SetButtonAppearDelay(Data.ButtonAppearDelay)
+				end
+
+				if Data.DelayedContinue then
+					Node:ContinueAfterDelay(Data.DelayedContinue.Delay, BuildDialog(Data.DelayedContinue.NextDialog))
+				end
+
+				if Data.Buttons then
+					for _, Button in ipairs(Data.Buttons) do
+						if Button.IsCloseButton then
+							Node:AddCloseButton(Button.Text)
+						else
+							Node:AddButton(Button.Text, BuildDialog(Button.NextDialog), Button.ActionKey)
+						end
+					end
+				end
+
+				return Node
+			end
+
+			Pages.PageSystem:OpenPage("DialogLobby", true)
+			local Page = Pages.PageSystem:WaitForPage("DialogLobby")
+
+			if JSON.Actions then
+				for Key, Fn in pairs(JSON.Actions) do
+					Page:HookDialogActionKey(Key, Fn)
+				end
+			end
+
+			Page:PlayDialog(BuildDialog(JSON.Dialog))
+		end)
+	end
+
+	local function SerializeEquipped()
+		local Out = {}
+		for WeaponName, CosmeticTypes in pairs(Equipped) do
+			Out[WeaponName] = {}
+			for CosmeticType, CosmeticData in pairs(CosmeticTypes) do
+				if CosmeticData and CosmeticData.Name then
+					Out[WeaponName][CosmeticType] = {
+						Name = CosmeticData.Name,
+						Inverted = CosmeticData.Inverted or false,
+						OnlyUseFavorites = CosmeticData.OnlyUseFavorites or false,
+						isRandom = CosmeticData.isRandom or false,
+						Seed = CosmeticData.Seed,
+					}
+				end
+			end
+			if not next(Out[WeaponName]) then
+				Out[WeaponName] = nil
+			end
+		end
+		return Out
+	end
+
+	local function DeserializeEquipped(SavedEquipped)
+		for WeaponName, CosmeticTypes in pairs(SavedEquipped) do
+			for CosmeticType, Saved in pairs(CosmeticTypes) do
+				if not Saved then
+					continue
+				end
+
+				API.SpoofGameComparator(WeaponName, Saved.Name)
+
+				if Saved.isRandom then
+					Equipped[WeaponName] = Equipped[WeaponName] or {}
+					Equipped[WeaponName][CosmeticType] = {
+						isRandom = true,
+						Name = Saved.Name or "RANDOM_COSMETIC",
+						OnlyUseFavorites = Saved.OnlyUseFavorites or false,
+						Seed = Saved.Seed or math.random(1, 9999999),
+						Type = CosmeticType,
+					}
+				else
+					local Cloned = CloneCosmetic(Saved.Name, CosmeticType, {
+						IsInverted = Saved.Inverted,
+						OnlyUseFavorites = Saved.OnlyUseFavorites,
+					})
+					if Cloned then
+						Equipped[WeaponName] = Equipped[WeaponName] or {}
+						Equipped[WeaponName][CosmeticType] = Cloned
+					end
+				end
+			end
+		end
+	end
+
+	local function SerializeFavorites()
+		local Out = {}
+		for WeaponName, Cosmetics in pairs(Favorited) do
+			Out[WeaponName] = {}
+			for CosmeticName, IsFav in pairs(Cosmetics) do
+				if IsFav then
+					Out[WeaponName][CosmeticName] = true
+				end
+			end
+			if not next(Out[WeaponName]) then
+				Out[WeaponName] = nil
+			end
+		end
+		return Out
+	end
+
+	local function DeserializeFavorites(SavedFavorites)
+		Favorited = {}
+		for WeaponName, Cosmetics in pairs(SavedFavorites or {}) do
+			for CosmeticName, IsFav in pairs(Cosmetics or {}) do
+				if IsFav then
+					Favorited[WeaponName] = Favorited[WeaponName] or {}
+					Favorited[WeaponName][CosmeticName] = true
+				end
+			end
+		end
+	end
+
+	API.SaveConfig = function()
+		local Ok, Json = pcall(function()
+			return Services.HttpService:JSONEncode({
+				equipped = SerializeEquipped(),
+				favorites = SerializeFavorites(),
+			})
+		end)
+		if not Ok then
+			return
+		end
+
+		pcall(function()
+			if not isfolder("ascida") then
+				makefolder("ascida")
+			end
+			writefile(Config.Files.Skins, Json)
+		end)
+	end
+
+	API.LoadConfig = function()
+		if not isfile(Config.Files.Skins) then
+			return
+		end
+
+		local Ok, Data = pcall(function()
+			return Services.HttpService:JSONDecode(readfile(Config.Files.Skins))
+		end)
+		if not Ok or not Data then
+			return
+		end
+
+		if Data.equipped then
+			DeserializeEquipped(Data.equipped)
+		end
+		if Data.favorites then
+			DeserializeFavorites(Data.favorites)
+		end
+
+		API.Replicate("CosmeticInventory")
+		API.Replicate("FavoritedCosmetics")
+	end
+
+	API.HookRemote = function()
+		if API._hookRemoteInstalled then
+			return
+		end
+		API._hookRemoteInstalled = true
+
+		local OldNamecall
+		OldNamecall = hookmetamethod(
+			game,
+			"__namecall",
+			newcclosure(function(Self, ...)
+				if checkcaller() then
+					return OldNamecall(Self, ...)
+				end
+
+				local Args = { ... }
+
+				if Self == EquipRemote then
+					local WeaponName = Args[1]
+					local CosmeticType = Args[2]
+					local CosmeticName = Args[3]
+					local Options = Args[4] or {}
+
+					if not WeaponName then
+						return OldNamecall(Self, ...)
+					end
+
+					Equipped[WeaponName] = Equipped[WeaponName] or {}
+
+					if not CosmeticName or CosmeticName == "None" or CosmeticName == "" then
+						Equipped[WeaponName][CosmeticType] = nil
+						if not next(Equipped[WeaponName]) then
+							Equipped[WeaponName] = nil
+						end
+					elseif CosmeticName == "RANDOM_COSMETIC" then
+						OnlyUseFavorites[WeaponName] = OnlyUseFavorites[WeaponName] or {}
+						OnlyUseFavorites[WeaponName][CosmeticType] = Options.OnlyUseFavorites or false
+
+						Equipped[WeaponName][CosmeticType] = {
+							isRandom = true,
+							Name = "RANDOM_COSMETIC",
+							Seed = math.random(1, 9999999),
+							OnlyUseFavorites = Options.OnlyUseFavorites or false,
+							Type = CosmeticType,
+						}
+					else
+						API.SpoofGameComparator(WeaponName, CosmeticName)
+
+						local Cloned = CloneCosmetic(CosmeticName, CosmeticType, {
+							IsInverted = Options.IsInverted or false,
+						})
+
+						if Cloned then
+							Equipped[WeaponName][CosmeticType] = Cloned
+						end
+					end
+
+					task.spawn(function()
+						API.Replicate("WeaponInventory")
+						API.SaveConfig()
+					end)
+
+					return nil
+				end
+
+				if Self == FavoriteRemote then
+					local Weapon = Args[1]
+					local CosmeticName = Args[2]
+					local IsFavorited = Args[3]
+
+					if Weapon and CosmeticName then
+						Favorited[Weapon] = Favorited[Weapon] or {}
+						Favorited[Weapon][CosmeticName] = IsFavorited or nil
+
+						if not next(Favorited[Weapon]) then
+							Favorited[Weapon] = nil
+						end
+
+						if OnlyUseFavorites[Weapon] then
+							OnlyUseFavorites[Weapon][CosmeticName] = IsFavorited and true or nil
+						end
+					end
+
+					task.spawn(function()
+						API.Replicate("FavoritedCosmetics")
+						API.SaveConfig()
+					end)
+
+					return nil
+				end
+
+				if Self == EquipEmote then
+					local Slot = Args[1]
+					local EmoteName = Args[2]
+
+					EquippedEmote = EmoteName
+					EquippedSlot = Slot
+
+					task.spawn(function()
+						API.Replicate("EquippedEmotes")
+					end)
+
+					return nil
+				end
+
+				return OldNamecall(Self, ...)
+			end)
+		)
+	end
+
+	API.SpoofViewModelImage = function()
+		local OldGetViewModelImage = Library.ItemLibrary.GetViewModelImageFromWeaponData
+		Library.ItemLibrary.GetViewModelImageFromWeaponData = function(Self, WeaponData, HighRes)
+			if not WeaponData then
+				return OldGetViewModelImage(Self, WeaponData, HighRes)
+			end
+
+			local Eq = Equipped[WeaponData.Name]
+			if Eq and Eq.Skin then
+				local SkinInfo = Library.ItemLibrary.ViewModels and Library.ItemLibrary.ViewModels[Eq.Skin.Name]
+				if SkinInfo then
+					return SkinInfo[HighRes and "ImageHighResolution" or "Image"] or SkinInfo.Image
+				end
+			end
+
+			if WeaponData.Skin and WeaponData.Skin.Name then
+				local SkinInfo = Library.ItemLibrary.ViewModels and Library.ItemLibrary.ViewModels[WeaponData.Skin.Name]
+				if SkinInfo then
+					return SkinInfo[HighRes and "ImageHighResolution" or "Image"] or SkinInfo.Image
+				end
+			end
+
+			return OldGetViewModelImage(Self, WeaponData, HighRes)
+		end
+	end
+
+	API.SetClassOfWeapon = function(Weapon, Class)
+		Library.ItemLibrary.Items[Weapon or "Assault Rifle"].Class = Class or "Standard"
+	end
+
+	API.SpoofedViewModels = API.SpoofedViewModels or {}
+
+	API.SpoofViewModelImageCustom = function(WeaponName, CosmeticName)
+		if not Library.ItemLibrary._OriginalGetViewModel then
+			Library.ItemLibrary._OriginalGetViewModel = Library.ItemLibrary.GetViewModelImageFromWeaponData
+		end
+
+		local Old = Library.ItemLibrary._OriginalGetViewModel
+
+		Library.ItemLibrary.GetViewModelImageFromWeaponData = function(Self, WeaponData, HighRes)
+			local Result = Old(Self, WeaponData, HighRes)
+
+			if WeaponData and WeaponData.Name == WeaponName then
+				local SkinInfo = ItemLib.ViewModels and ItemLib.ViewModels[CosmeticName]
+				if SkinInfo then
+					return SkinInfo[HighRes and "ImageHighResolution" or "Image"] or SkinInfo.Image
+				end
+			end
+
+			return Result
+		end
+
+		task.spawn(function()
+			while true do
+				local VM = ItemLib.ViewModels
+				if VM then
+					local WeaponVM = VM[WeaponName]
+					local CosmeticVM = VM[CosmeticName]
+
+					if WeaponVM and CosmeticVM then
+						WeaponVM.Image = CosmeticVM.Image
+						WeaponVM.ImageHighResolution = CosmeticVM.ImageHighResolution
+					end
+				end
+				task.wait(0.3)
+			end
+		end)
+	end
+
+	API.SetPlayerStatus = function(Status)
+		LocalPlayer:SetAttribute("PlayerStatus", Status)
+	end
+
+	API.SpoofLeaderboard = function(LeaderboardName, Value, Position)
+		if LeaderboardName == "Highest ELO" then
+			API.SpoofRank("Archnemesis")
+		end
+
+		local LeaderboardController = require(PlayerScripts.Controllers.LeaderboardController)
+
+		LeaderboardController.LeaderboardSerials[LeaderboardName] = LeaderboardController.LeaderboardSerials[LeaderboardName]
+			or { Players = {} }
+
+		local Players = LeaderboardController.LeaderboardSerials[LeaderboardName].Players
+
+		for I = #Players, 1, -1 do
+			if Players[I].key == tostring(LocalPlayer.UserId) then
+				table.remove(Players, I)
+			end
+		end
+
+		table.insert(Players, Position, {
+			key = tostring(LocalPlayer.UserId),
+			value = Value,
+		})
+
+		LeaderboardController:GetLeaderboardRefreshedSignal(LeaderboardName):Fire()
+	end
+
+	API.SpoofRank = function(Rank, Elo)
+		if not Library.SeasonLibrary._ascidaRankHooked then
+			Library.SeasonLibrary._ascidaRankHooked = true
+
+			local OrigGetRank = Library.SeasonLibrary.GetRank
+			Library.SeasonLibrary.GetRank = function(Self, EloArg, UserId, Ranking, ProfileName)
+				if UserId == LocalPlayer.UserId then
+					return getgenv()._ascidaSpoofedRank or "Unranked"
+				end
+				return OrigGetRank(Self, EloArg, UserId, Ranking, ProfileName)
+			end
+		end
+
+		getgenv()._ascidaSpoofedRank = Rank or "Unranked"
+		LocalPlayer:SetAttribute("DisplayELO", Elo or 676767)
+	end
+
+	API.SpoofClass = function(Weapon, Class)
+		Library.ItemLibrary.Items[Weapon or "Assault Rifle"].Class = Class or "Standard"
+	end
+
+	local ProfileSpoofData = nil
+	local ProfileHookInstalled = false
+
+	API.SpoofProfile = function(ProfileData)
+		ProfileSpoofData = ProfileData or nil
+
+		if not ProfileHookInstalled then
+			ProfileHookInstalled = true
+
+			local OldNamecall
+			OldNamecall = hookmetamethod(
+				game,
+				"__namecall",
+				newcclosure(function(Self, ...)
+					if checkcaller() then
+						return OldNamecall(Self, ...)
+					end
+
+					local Method = getnamecallmethod()
+					if Method == "InvokeServer" and Self.Name == "RequestProfile" and Self == LocalPlayer then
+						local Result = OldNamecall(Self, ...)
+
+						if type(Result) == "table" then
+							if
+								Result.HeadshotIcon
+								and not tostring(Result.HeadshotIcon.Image):find(tostring(LocalPlayer.UserId))
+							then
+								return Result
+							end
+
+							local D = ProfileSpoofData
+							Result.Level = tonumber(LocalPlayer:GetAttribute("Level"))
+							if D.RankedCurrentELO or D.Elo then
+								Result.RankedCurrentELO = tonumber(D.RankedCurrentELO) or tonumber(D.Elo)
+							end
+							if D.RankedWins then
+								Result.RankedWins = tonumber(D.RankedWins)
+							end
+							if D.CasualWins then
+								Result.CasualWins = tonumber(D.CasualWins)
+							end
+							if D.RankedWinPercent then
+								Result.RankedWinPercent = tonumber(D.RankedWinPercent)
+							end
+							if D.CasualWinPercent then
+								Result.CasualWinPercent = tonumber(D.CasualWinPercent)
+							end
+							if D.WinStreak then
+								Result.WinStreak = tonumber(D.WinStreak)
+							end
+							if D.FavoriteWeapons then
+								Result.FavoriteWeapons = D.FavoriteWeapons
+							end
+							if D.FavoriteMap then
+								Result.FavoriteMap = D.FavoriteMap
+							end
+						end
+
+						return Result
+					end
+
+					return OldNamecall(Self, ...)
+				end)
+			)
+		end
+
+		task.spawn(function()
+			pcall(function()
+				local ViewProfile = require(PlayerScripts.Modules.Pages.ViewProfile)
+				if not ViewProfile then
+					return
+				end
+
+				if ViewProfile.RankFrame then
+					ViewProfile.RankFrame.Visible = true
+				end
+				if ViewProfile.RankContainer then
+					ViewProfile.RankContainer.Visible = true
+				end
+				if ViewProfile.WinsButton then
+					ViewProfile.WinsButton.Visible = true
+				end
+
+				if not ViewProfile._ascidaSwitchHooked then
+					ViewProfile._ascidaSwitchHooked = true
+					local OldSwitch = ViewProfile.SwitchWinsTab
+					if OldSwitch then
+						hookfunction(
+							ViewProfile.SwitchWinsTab,
+							newcclosure(function(P1, P2)
+								P1._wins_tab_is_casual = P2 == nil and true or P2
+								P1.WinsButton.Visible = true
+								P1.RankFrame.Visible = true
+								P1.WinsButtonCasualBackground.BackgroundTransparency = P1._wins_tab_is_casual and 0.75
+									or 0
+								P1.CasualFrame.Visible = P1._wins_tab_is_casual
+								P1.WinsButtonRankedBackground.BackgroundTransparency = P1._wins_tab_is_casual and 0
+									or 0.75
+								P1.RankedFrame.Visible = not P1._wins_tab_is_casual
+							end)
+						)
+
+						ViewProfile:SwitchWinsTab(false)
+					end
+				end
+			end)
+		end)
+	end
+
+	local BundleUnlockHookInstalled = false
+	local BundleUnlockOriginalNamecall = nil
+
+	API.HookBundleUnlock = function()
+		if BundleUnlockHookInstalled then
+			return
+		end
+		BundleUnlockHookInstalled = true
+
+		local MonetizationLibrary = require(Services.ReplicatedStorage.Modules.MonetizationLibrary)
+
+		local function FixScreen()
+			task.spawn(function()
+				task.wait(0.1)
+
+				for _, V in pairs(Services.Lighting:GetChildren()) do
+					pcall(function()
+						if V:IsA("BlurEffect") and V.Name ~= "AscidaBlur" then
+							V.Enabled = false
+						end
+					end)
+				end
+
+				for _, V in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
+					pcall(function()
+						if V:IsA("Frame") then
+							if V.BackgroundColor3 == Color3.fromRGB(0, 0, 0) and V.BackgroundTransparency < 0.5 then
+								V.BackgroundTransparency = 1
+							end
+						end
+					end)
+				end
+			end)
+		end
+
+		local function UnlockBundle(Bundle)
+			if not Bundle then
+				return
+			end
+			for _, Reward in pairs(Bundle.Rewards or {}) do
+				if Reward.Name and Library.CosmeticLibrary.Cosmetics[Reward.Name] then
+					Library.PlayerDataController.CurrentData.Data.CosmeticInventory = Library.PlayerDataController.CurrentData.Data.CosmeticInventory
+						or {}
+					rawset(Library.PlayerDataController.CurrentData.Data.CosmeticInventory, Reward.Name, true)
+				end
+			end
+			Library.PlayerDataController.CurrentData:Replicate("CosmeticInventory")
+			FixScreen()
+		end
+
+		BundleUnlockOriginalNamecall = hookmetamethod(
+			game,
+			"__namecall",
+			newcclosure(function(Self, ...)
+				if checkcaller() then
+					return BundleUnlockOriginalNamecall(Self, ...)
+				end
+
+				local Method = getnamecallmethod()
+
+				if Method == "PromptProductPurchase" or Method == "PromptGamePassPurchase" then
+					local ProductId = select(2, ...)
+
+					for _, Bundle in pairs(MonetizationLibrary.Bundles) do
+						if Bundle.ProductID == ProductId or Bundle.GamepassID == ProductId then
+							UnlockBundle(Bundle)
+							return
+						end
+					end
+
+					for _, Gamepass in pairs(MonetizationLibrary.Gamepasses) do
+						if Gamepass.GamepassID == ProductId then
+							if Gamepass.BundleName then
+								UnlockBundle(MonetizationLibrary.Bundles[Gamepass.BundleName])
+							end
+							return
+						end
+					end
+
+					return
+				end
+
+				return BundleUnlockOriginalNamecall(Self, ...)
+			end)
+		)
+	end
+
+	API.UnhookBundleUnlock = function()
+		if not BundleUnlockHookInstalled then
+			return
+		end
+		BundleUnlockHookInstalled = false
+
+		if BundleUnlockOriginalNamecall then
+			hookmetamethod(game, "__namecall", BundleUnlockOriginalNamecall)
+			BundleUnlockOriginalNamecall = nil
+		end
+	end
+
+	API.AddBulletTracer = function(Weapon)
+		local Keyper = require(PlayerScripts.Modules.ViewModels.Sniper.Keyper)
+		local Item = require(PlayerScripts.Modules.ViewModels[Weapon])
+
+		Item["CustomTracers"] = Keyper["CustomTracers"]
+		Item["_UpdateBulletTrail"] = Keyper["_UpdateBulletTrail"]
+	end
+
+	API.RemoveBulletTracer = function(Weapon)
+		local Item = require(PlayerScripts.Modules.ViewModels[Weapon])
+
+		Item["CustomTracers"] = nil
+		Item["_UpdateBulletTrail"] = nil
+	end
+
+	API.HookViewModel = function()
+		task.spawn(function()
+			local ClientItemPath = PlayerScripts:WaitForChild("Modules", 10)
+				:WaitForChild("ClientReplicatedClasses", 10)
+				:WaitForChild("ClientFighter", 10)
+				:WaitForChild("ClientItem", 10)
+
+			local Ok, ClientItem = pcall(require, ClientItemPath)
+			if not Ok or not ClientItem then
+				return
+			end
+
+			if ClientItem._CreateViewModel and not ClientItem.__hooked_CreateViewModel then
+				ClientItem.__hooked_CreateViewModel = true
+
+				local Orig = ClientItem._CreateViewModel
+				ClientItem._CreateViewModel = function(Self, ViewmodelRef)
+					local WeaponName = Self.Name
+					local IsMine = Self.ClientFighter and Self.ClientFighter.Player == LocalPlayer
+
+					if IsMine and Equipped[WeaponName] and ViewmodelRef then
+						local DataKey = Self:ToEnum("Data")
+						local VD = ViewmodelRef[DataKey]
+						if VD then
+							local Eq = Equipped[WeaponName]
+							if Eq.Skin then
+								if Eq.Skin.Name == "RANDOM_COSMETIC" then
+									local RandomSkin = API.GetRandom(WeaponName, "Skin")
+									if RandomSkin then
+										VD[Self:ToEnum("Skin")] = RandomSkin
+										VD[Self:ToEnum("Name")] = RandomSkin.Name
+									end
+								else
+									VD[Self:ToEnum("Skin")] = Eq.Skin
+									VD[Self:ToEnum("Name")] = Eq.Skin.Name
+								end
+							end
+							if Eq.Charm then
+								if Eq.Charm.Name == "RANDOM_COSMETIC" then
+									local RandomCharm = API.GetRandom(WeaponName, "Charm")
+									if RandomCharm then
+										VD[Self:ToEnum("Charm")] = RandomCharm
+									end
+								else
+									VD[Self:ToEnum("Charm")] = Eq.Charm
+								end
+							end
+						end
+					end
+
+					local Result = Orig(Self, ViewmodelRef)
+
+					if IsMine and Equipped[WeaponName] and ViewmodelRef then
+						task.defer(function()
+							pcall(function()
+								local VD = ViewmodelRef[Self:ToEnum("Data")]
+								if not VD then
+									return
+								end
+								local Eq = Equipped[WeaponName]
+								if Eq and Eq.Finisher then
+									if Eq.Finisher.Name == "RANDOM_COSMETIC" then
+										local RandomFinisher = API.GetRandom(WeaponName, "Finisher")
+										if RandomFinisher then
+											VD[Self:ToEnum("Finisher")] = RandomFinisher
+										end
+									else
+										local FEnum = Eq.Finisher.Enum
+										if not FEnum and Library.EnumLibrary and Library.EnumLibrary.ToEnum then
+											pcall(function()
+												FEnum = Library.EnumLibrary:ToEnum(Eq.Finisher.Name)
+											end)
+										end
+										if FEnum then
+											VD[Self:ToEnum("Finisher")] = FEnum
+										end
+									end
+								end
+							end)
+						end)
+					end
+
+					return Result
+				end
+			end
+
+			local ViewModelModule = ClientItemPath:FindFirstChild("ClientViewModel")
+			if not ViewModelModule then
+				return
+			end
+
+			local Ok2, ViewModel = pcall(require, ViewModelModule)
+			if not Ok2 or not ViewModel or not ViewModel.GetWrap or ViewModel.__hooked_GetWrap then
+				return
+			end
+			ViewModel.__hooked_GetWrap = true
+
+			local OrigGetWrap = ViewModel.GetWrap
+			ViewModel.GetWrap = function(Self)
+				local CI = Self.ClientItem
+				if CI and CI.ClientFighter and CI.ClientFighter.Player == LocalPlayer then
+					local WeaponName = CI.Name
+					local Eq = Equipped[WeaponName]
+					if Eq and Eq.Wrap then
+						if Eq.Wrap.isRandom or Eq.Wrap.Name == "RANDOM_COSMETIC" then
+							local WrapData = API.GetRandom(WeaponName, "Wrap")
+							if WrapData then
+								return WrapData
+							end
+						end
+						return Eq.Wrap
+					end
+				end
+				return OrigGetWrap(Self)
+			end
+
+			local ClientEntity = require(LocalPlayer.PlayerScripts.Modules.ClientReplicatedClasses.ClientEntity)
+			if ClientEntity.ReplicateFromServer and not ClientEntity._ascidaFinisherHooked then
+				ClientEntity._ascidaFinisherHooked = true
+
+				local LastUsedWeapon
+				local OrigReplicateFromServer = ClientEntity.ReplicateFromServer
+				ClientEntity.ReplicateFromServer = function(Self, Action, ...)
+					if Library.FighterController and Library.FighterController.LocalFighter then
+						local Item = Library.FighterController.LocalFighter.EquippedItem
+						if Item then
+							LastUsedWeapon = Item.Name
+						end
+					end
+
+					if Action == "FinisherEffect" then
+						pcall(function()
+							local Storage = getgenv().UI
+								and getgenv().UI.Storage
+								and getgenv().UI.Storage.CustomSounds.FINISH
+							if Storage and Storage.Enabled and Storage.Id ~= "" then
+								local Sound = Instance.new("Sound")
+								Sound.SoundId = Storage.Id
+								Sound.Volume = math.min(Storage.Volume or 1, 1)
+								Sound.PlaybackSpeed = Storage.Pitch or 1
+								Sound.RollOffMaxDistance = 0
+								Sound.Parent = workspace
+								Sound:Play()
+								Services.Debris:AddItem(Sound, 5)
+							end
+						end)
+
+						local Args = { ... }
+						local enumVal, isFinal, eliminator, serial = ...
+						local KillerName = Args[3]
+						local DecodedKiller = KillerName
+						if type(KillerName) == "userdata" and Library.EnumLibrary and Library.EnumLibrary.FromEnum then
+							pcall(function()
+								DecodedKiller = Library.EnumLibrary:FromEnum(KillerName)
+							end)
+						end
+						local Finishers = Services.ReplicatedStorage.Modules.Finishers
+						local IsOurKill = tostring(DecodedKiller) == LocalPlayer.Name
+							or tostring(DecodedKiller):lower() == LocalPlayer.Name:lower()
+						if
+							IsOurKill
+							and LastUsedWeapon
+							and Equipped[LastUsedWeapon]
+							and Equipped[LastUsedWeapon].Finisher
+						then
+							if Equipped[LastUsedWeapon].Finisher.Name == "RANDOM_COSMETIC" then
+								local RandomFinisher = API.GetRandom(LastUsedWeapon, "Finisher")
+								if RandomFinisher then
+									local FinisherEnum = RandomFinisher.Enum
+									if not FinisherEnum and Library.EnumLibrary and Library.EnumLibrary.ToEnum then
+										pcall(function()
+											FinisherEnum = Library.EnumLibrary:ToEnum(RandomFinisher.Name)
+										end)
+									end
+									if FinisherEnum then
+										local subject = Self.Model or (Self.RootPart and Self.RootPart.Parent)
+										if not subject or not subject:IsDescendantOf(workspace) then
+											return
+										end
+
+										local clone = subject:Clone()
+										pcall(function()
+											clone.Parent = workspace
+										end)
+
+										local function FindFirstDescendantOfClass(parent, class)
+											for _, v in ipairs(parent:GetDescendants()) do
+												if v:IsA(class) then
+													return v
+												end
+											end
+										end
+
+										local finisher = require(Finishers[RandomFinisher.Name]).new(
+											FindFirstDescendantOfClass(clone, "Humanoid"),
+											isFinal,
+											eliminator
+										)
+										local origDestroy = finisher.Destroy
+
+										finisher.Destroy = function(f)
+											pcall(function()
+												clone:Destroy()
+											end)
+											return origDestroy(f)
+										end
+
+										finisher:SetSerial(serial)
+										finisher:Simulate()
+
+										Self.Model:Destroy()
+									end
+								end
+							else
+								local FinisherData = Equipped[LastUsedWeapon].Finisher
+								local FinisherEnum = FinisherData.Enum
+								if not FinisherEnum and Library.EnumLibrary and Library.EnumLibrary.ToEnum then
+									pcall(function()
+										FinisherEnum = Library.EnumLibrary:ToEnum(FinisherData.Name)
+									end)
+								end
+								if FinisherEnum then
+									local subject = Self.Model or (Self.RootPart and Self.RootPart.Parent)
+									if not subject or not subject:IsDescendantOf(workspace) then
+										return
+									end
+
+									local clone = subject:Clone()
+									pcall(function()
+										clone.Parent = workspace
+									end)
+
+									local finisher = require(Finishers[FinisherData.Name]).new(
+										clone:FindFirstChildOfClass("Humanoid"),
+										isFinal,
+										eliminator
+									)
+									local origDestroy = finisher.Destroy
+
+									finisher.Destroy = function(f)
+										pcall(function()
+											clone:Destroy()
+										end)
+										return origDestroy(f)
+									end
+
+									finisher:SetSerial(serial)
+									finisher:Simulate()
+
+									Self.Model:Destroy()
+								end
+							end
+						end
+					end
+
+					return OrigReplicateFromServer(Self, Action, ...)
+				end
+			end
+		end)
+	end
+
+	API.FavoriteCosmetic = function(Weapon, CosmeticType, Cosmetic)
+		Favorited[Weapon] = Favorited[Weapon] or {}
+		Favorited[Weapon][CosmeticType] = Cosmetic or nil
+	end
+
+	API.SetControls = function(Control)
+		Services.ReplicatedStorage.Remotes.Replication.Fighter.SetControls:FireServer(Control or "VR")
+	end
+
+	API.SpoofRegion = function(Region)
+		workspace:SetAttribute("ServerRegion", Region or workspace:GetAttribute("ServerRegion"))
+	end
+
+	API.SetCustomControls = function(Asset)
+		local Constants = require(Services.ReplicatedStorage.Modules.CONSTANTS)
+
+		Services.ReplicatedStorage.Remotes.Replication.Fighter.SetControls:FireServer("VR")
+
+		local GamepadImages = {
+			[Constants["CONTROLS_IMAGES"]["VR"]] = true,
+			[Constants["CONTROLS_IMAGES_CENTERED"]["VR"]] = true,
+		}
+
+		local Meta = getrawmetatable(game)
+		local OldNewindex = Meta.__newindex
+		setreadonly(Meta, false)
+
+		Meta.__newindex = newcclosure(function(Self, Key, Value)
+			if Key == "Image" and Self:IsA("ImageLabel") and GamepadImages[Value] then
+				Value = "rbxthumb://type=Asset&id=" .. tostring(Asset) .. "&w=420&h=420"
+			end
+			return OldNewindex(Self, Key, Value)
+		end)
+
+		setreadonly(Meta, true)
+	end
+
+	API.UserJSON = {
+		SpoofPremium = false,
+		SpoofVerified = false,
+		SpoofUsername = nil,
+		SpoofDisplay = nil,
+	}
+
+	do
+		local OldIndex
+		OldIndex = hookmetamethod(
+			game,
+			"__index",
+			newcclosure(function(Self, Key)
+				if checkcaller() then
+					return OldIndex(Self, Key)
+				end
+
+				if Self == LocalPlayer then
+					if Key == "MembershipType" and API.UserJSON.SpoofPremium then
+						return Enum.MembershipType.Premium
+					end
+
+					if Key == "HasVerifiedBadge" and API.UserJSON.SpoofVerified then
+						return true
+					end
+
+					if Key == "Name" and API.UserJSON.SpoofUsername then
+						return API.UserJSON.SpoofUsername
+					end
+
+					if Key == "DisplayName" and API.UserJSON.SpoofDisplay then
+						return API.UserJSON.SpoofDisplay
+					end
+				end
+
+				return OldIndex(Self, Key)
+			end)
+		)
+	end
+
+	API.SpoofLocalplayer = function(JSON)
+		local CurrentLevel = tonumber(LocalPlayer:GetAttribute("Level")) or 0
+
+		API.SetAttribute("Level", CurrentLevel + 1, false)
+		API.SetAttribute("Level", CurrentLevel, false)
+
+		if type(JSON) == "table" then
+			for K, V in pairs(JSON) do
+				API.UserJSON[K] = V
+			end
+		end
+	end
+
+	local OriginalSetCurrentSlot = nil
+
+	API.RemoveWeaponClass = function()
+		if Library.PickWeapons._ascidaClassHooked then
+			return
+		end
+		Library.PickWeapons._ascidaClassHooked = true
+
+		OriginalSetCurrentSlot = Library.PickWeapons.SetCurrentSlot
+		Library.PickWeapons.SetCurrentSlot = function(Self, Slot)
+			if FighterController and FighterController.LocalFighter then
+				local LocalFighter = FighterController.LocalFighter
+				local OrigGet = LocalFighter.Get
+				LocalFighter.Get = function(Self2, Key, ...)
+					if Key == "WeaponClassRestrictionDisabled" then
+						return true
+					end
+					return OrigGet(Self2, Key, ...)
+				end
+				OriginalSetCurrentSlot(Self, Slot)
+				LocalFighter.Get = OrigGet
+			else
+				OriginalSetCurrentSlot(Self, Slot)
+			end
+		end
+	end
+
+	API.RestoreWeaponClass = function()
+		if OriginalSetCurrentSlot then
+			Library.PickWeapons.SetCurrentSlot = OriginalSetCurrentSlot
+			Library.PickWeapons._ascidaClassHooked = false
+			OriginalSetCurrentSlot = nil
+		end
+	end
+
+	API.SpoofResource = function(Resource, Value)
+		rawset(Library.PlayerDataController.CurrentData.Data, Resource, tonumber(Value) or Value)
+		Library.PlayerDataController.CurrentData:Replicate(Resource)
+	end
+
+	API.SpoofStatics = function(Search, Value)
+		for _, V in
+			ipairs(
+				LocalPlayer.PlayerGui.MainGui.MainFrame.Equipment.Right.List.Container.EquipmentMetricCard:GetDescendants()
+			)
+		do
+			if V:IsA("TextLabel") and V.Name == "Title" then
+				if string.lower(V.Text) == string.lower(Search) then
+					local ChildSlot = V.Parent.Parent
+					local ValueLabel = ChildSlot:FindFirstChild("Value")
+					if ValueLabel and ValueLabel:IsA("TextLabel") then
+						ValueLabel.Text = Value
+					end
+				end
+			end
+		end
+	end
+
+	API.AddNotificationToWeapon = function(CosmeticName, WeaponName)
+		pcall(function()
+			local Data = Library.PlayerDataController.CurrentData.Data
+			Data.CosmeticNotifications = Data.CosmeticNotifications or {}
+			Data.CosmeticNotifications[CosmeticName] = Data.CosmeticNotifications[CosmeticName] or {}
+			Data.CosmeticNotifications[CosmeticName][WeaponName] = true
+			Library.PlayerDataController.CurrentData:Replicate("CosmeticNotifications")
+		end)
+	end
+
+	API.SpoofContract = function(Weapon, ContractName, Value)
+		local WS = Library.PlayerDataController.CurrentData.Data.WeaponStatistics
+		if not WS then
+			rawset(Library.PlayerDataController.CurrentData.Data, "WeaponStatistics", {})
+			WS = Library.PlayerDataController.CurrentData.Data.WeaponStatistics
+		end
+
+		if not WS[Weapon] then
+			rawset(WS, Weapon, {})
+		end
+
+		rawset(WS[Weapon], ContractName, tonumber(Value))
+		Library.PlayerDataController.CurrentData:Replicate("WeaponStatistics")
+	end
+
+	API.GetLocalPlayer = function()
+		return LocalPlayer
+	end
+
+	local HookedSoundModules = {}
+
+	API.SpoofSound = function(SoundStorage, Search)
+		pcall(function()
+			local AnimationLibrary = Services.ReplicatedStorage.Modules.AnimationLibrary
+
+			local function PlaySound(Vol, Pitch, OriginalId)
+				if not SoundStorage.Enabled then
+					return
+				end
+				local Sound = Instance.new("Sound")
+				Sound.SoundId = SoundStorage.Original and OriginalId or SoundStorage.Id
+				Sound.Volume = SoundStorage.Volume or Vol or 1
+				Sound.PlaybackSpeed = SoundStorage.Pitch or Pitch or 1
+				Sound.Parent = workspace
+				Sound:Play()
+				Services.Debris:AddItem(Sound, 5)
+			end
+
+			for _, Module in pairs(AnimationLibrary:GetChildren()) do
+				if string.find(Module.Name:lower(), Search) then
+					if HookedSoundModules[Module] then
+						continue
+					end
+					HookedSoundModules[Module] = true
+
+					local Ok, Fn = pcall(require, Module)
+					if Ok and type(Fn) == "function" then
+						local OrigFn = clonefunction(Fn)
+						hookfunction(
+							Fn,
+							newcclosure(function(P1, A, B)
+								local OrigCreateSound = P1.CreateSound
+								P1.CreateSound = newcclosure(function(Self, SoundId, Vol, Pitch, ...)
+									PlaySound(Vol, Pitch, SoundId)
+									return OrigCreateSound(Self, SoundId, Vol, Pitch, ...)
+								end)
+								local Result = OrigFn(P1, A, B)
+								P1.CreateSound = OrigCreateSound
+								return Result
+							end)
+						)
+					end
+				end
+			end
+		end)
+	end
+
+	API.DownloadAsset = function(Path, URL)
+		local Ok, Result = pcall(function()
+			return game:HttpGet(URL)
+		end)
+		if not Ok then
+			return
+		end
+		writefile(Path, tostring(Result))
+		return getcustomasset(Path)
+	end
+
+	API.SetColorCorrection = function(Saturation, Contrast, Brightness)
+		local CC = Services.Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+		if not CC then
+			CC = Instance.new("ColorCorrectionEffect", Services.Lighting)
+		end
+		CC.Saturation = Saturation or 0
+		CC.Contrast = Contrast or 0
+		CC.Brightness = Brightness or 0
+	end
+
+	API.SetAmbient = function(Color)
+		Services.Lighting.Ambient = Color or Color3.fromRGB(128, 128, 128)
+	end
+	API.SetColorShiftBottom = function(Color)
+		Services.Lighting.ColorShift_Bottom = Color or Color3.fromRGB(0, 0, 0)
+	end
+	API.SetColorShiftTop = function(Color)
+		Services.Lighting.ColorShift_Top = Color or Color3.fromRGB(0, 0, 0)
+	end
+	API.SetFogColor = function(Color)
+		Services.Lighting.FogColor = Color or Color3.fromRGB(192, 192, 192)
+	end
+
+	API.SetFogEnd = function(Value)
+		Services.Lighting.FogEnd = Value or 2500
+	end
+
+	API.SetFogStart = function(Value)
+		Services.Lighting.FogStart = Value or 0
+	end
+
+	API.SetExposureCompensation = function(Value)
+		Services.Lighting.ExposureCompensation = Value or 0
+	end
+
+	API.SetBrightness = function(Value)
+		Services.Lighting.Brightness = Value or 3
+	end
+
+	API.SetClockTime = function(Value)
+		Services.Lighting.ClockTime = Value or 12
+	end
+
+	API.SetGlobalShadows = function(Value)
+		Services.Lighting.GlobalShadows = Value
+	end
+
+	API.SetTechnology = function(Value)
+		Services.Lighting.Technology = Value or Enum.Technology.Future
+	end
+
+	local SkyboxConnection = nil
+	API.SetSkybox = function(SkyboxName)
+		local Boxes = {
+			["Spongebob"] = {
+				SkyboxBk = "rbxassetid://15962101128",
+				SkyboxDn = "rbxassetid://15970246218",
+				SkyboxFt = "rbxassetid://15962101128",
+				SkyboxLf = "rbxassetid://15962101128",
+				SkyboxRt = "rbxassetid://15962101128",
+				SkyboxUp = "rbxassetid://15962901054",
+			},
+			["Sunset"] = {
+				SkyboxBk = "rbxassetid://35268852",
+				SkyboxDn = "rbxassetid://35268837",
+				SkyboxFt = "rbxassetid://35268884",
+				SkyboxLf = "rbxassetid://35268868",
+				SkyboxRt = "rbxassetid://35268872",
+				SkyboxUp = "rbxassetid://35268877",
+			},
+			["Earth"] = {
+				SkyboxBk = "rbxassetid://166509999",
+				SkyboxDn = "rbxassetid://166510057",
+				SkyboxFt = "rbxassetid://166510116",
+				SkyboxLf = "rbxassetid://166510092",
+				SkyboxRt = "rbxassetid://166510131",
+				SkyboxUp = "rbxassetid://166510114",
+			},
+			["Nebula"] = {
+				SkyboxBk = "rbxassetid://129876530632297",
+				SkyboxDn = "rbxassetid://108406529909981",
+				SkyboxFt = "rbxassetid://104400530594543",
+				SkyboxLf = "rbxassetid://73372229972523",
+				SkyboxRt = "rbxassetid://87408857415924",
+				SkyboxUp = "rbxassetid://137817405681365",
+			},
+			["Saturn"] = {
+				SkyboxBk = "rbxassetid://1898724755",
+				SkyboxDn = "rbxassetid://1898727189",
+				SkyboxFt = "rbxassetid://1898722814",
+				SkyboxLf = "rbxassetid://1898729298",
+				SkyboxRt = "rbxassetid://1898741025",
+				SkyboxUp = "rbxassetid://1898736761",
+			},
+		}
+
+		if not Boxes[SkyboxName] then
+			return
+		end
+
+		local function ApplySkybox()
+			for _, V in pairs(Services.Lighting:GetChildren()) do
+				if V:IsA("Sky") then
+					V:Destroy()
+				end
+			end
+
+			local Sky = Instance.new("Sky")
+			for Key, Value in pairs(Boxes[SkyboxName]) do
+				Sky[Key] = Value
+			end
+			Sky.Parent = Services.Lighting
+		end
+
+		ApplySkybox()
+
+		if SkyboxConnection then
+			SkyboxConnection:Disconnect()
+		end
+
+		SkyboxConnection = Services.Lighting.ChildAdded:Connect(function(Child)
+			if Child:IsA("Sky") then
+				task.wait()
+				ApplySkybox()
+			end
+		end)
+	end
+
+	API.SetBloom = function(Enabled, Intensity, Size, Threshold)
+		local Bloom = Services.Lighting:FindFirstChild("AscidaBloom")
+		if not Enabled then
+			if Bloom then
+				Bloom:Destroy()
+			end
+			return
+		end
+		if not Bloom then
+			Bloom = Instance.new("BloomEffect", Services.Lighting)
+			Bloom.Name = "AscidaBloom"
+		end
+		Bloom.Intensity = Intensity or 0.6
+		Bloom.Size = Size or 26
+		Bloom.Threshold = Threshold or 0.4
+		Bloom.Enabled = true
+	end
+
+	API.SetSunRays = function(Enabled, Intensity)
+		local SunRays = Services.Lighting:FindFirstChild("AscidaSunRays")
+		if not Enabled then
+			if SunRays then
+				SunRays:Destroy()
+			end
+			return
+		end
+		if not SunRays then
+			SunRays = Instance.new("SunRaysEffect", Services.Lighting)
+			SunRays.Name = "AscidaSunRays"
+		end
+		SunRays.Intensity = Intensity or 0.1
+	end
+
+	API.SetFOV = function(Value)
+		workspace.CurrentCamera.FieldOfView = Value or 70
+	end
+
+	API.SetAspectRatio = function(TargetRatio)
+		local Camera = workspace.CurrentCamera
+
+		Services.RunService:BindToRenderStep("AspectRatioFix", Enum.RenderPriority.Camera.Value + 1, function()
+			if Camera then
+				Camera.CFrame = Camera.CFrame * CFrame.new(0, 0, 0, 1, 0, 0, 0, TargetRatio, 0, 0, 0, 1)
+			end
+		end)
+	end
+
+	API.RemoveAspectRatio = function()
+		Services.RunService:UnbindFromRenderStep("AspectRatioFix")
+	end
+
+	API.SetBlur = function(Value)
+		local Blur = Services.Lighting:FindFirstChild("AscidaBlur")
+		if Value == 0 then
+			if Blur then
+				Blur:Destroy()
+			end
+			return
+		end
+		if not Blur then
+			Blur = Instance.new("BlurEffect", Services.Lighting)
+			Blur.Name = "AscidaBlur"
+		end
+		Blur.Size = Value or 0
+	end
+
+	API.SetHandicaps = function(value)
+		require(PlayerScripts.Controllers:WaitForChild("DebugController")):SetHandicapsEnabled(value)
+	end
+
+	API.SetAura = function(Value, Attach)
+		local function CreateParticle(Class, Properties)
+			local Obj = Instance.new(Class)
+			for Prop, Val in pairs(Properties) do
+				Obj[Prop] = Val
+			end
+			return Obj
+		end
+
+		if Value == "the_chosen_one" then
+			local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+			local Root = Character:WaitForChild(Attach or "HumanoidRootPart")
+
+			local Att1 = CreateParticle("Attachment", {
+				Name = "1",
+				Parent = Root,
+				Position = Vector3.new(0, -1, 0),
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Big ring",
+				Parent = Att1,
+				Brightness = 2,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
+				LightEmission = 0,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(13),
+				Texture = "rbxassetid://128389339609442",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 1,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(150),
+				Speed = NumberRange.new(0.005),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/15691415178",
+				Parent = Att1,
+				Brightness = 1,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
+				LightEmission = -0.01,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(11),
+				Texture = "rbxassetid://100281401469070",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 3,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(30, 30),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookBlendFrames = true,
+				FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			})
+
+			local Att2 = CreateParticle("Attachment", {
+				Name = "2",
+				Parent = Root,
+				Position = Vector3.new(0, 0, 0),
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/384_Sem_Titulo_20241208224902",
+				Parent = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
+				LightEmission = -5,
+				Orientation = Enum.ParticleOrientation.VelocityPerpendicular,
+				Size = NumberSequence.new(9),
+				Texture = "rbxassetid://140248623110087",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 2,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(150),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(45, 45),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/orber",
+				Parent = Att2,
+				Brightness = 2,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
+				LightEmission = 0,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(10),
+				Texture = "rbxassetid://15441247020",
+				Transparency = NumberSequence.new(0.5),
+				Lifetime = NumberRange.new(1),
+				Rate = 5,
+				Rotation = NumberRange.new(0, 0),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookBlendFrames = true,
+				FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "STAR",
+				Parent = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				LightEmission = -1,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(10),
+				Texture = "rbxassetid://100955378623032",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 2,
+				Rotation = NumberRange.new(0, 0),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("Trail", {
+				Name = "Images/0a9af0c37a7cceb612a6d4bc0c",
+				Parent = Root,
+				Attachment0 = Att1,
+				Attachment1 = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				FaceCamera = true,
+				Texture = "rbxassetid://120245170998484",
+				TextureLength = 1,
+				TextureMode = Enum.TextureMode.Stretch,
+				Transparency = NumberSequence.new(0),
+				Enabled = true,
+				Lifetime = 0.2,
+				MaxLength = 0,
+				MinLength = 0.1,
+				WidthScale = 10,
+			})
+
+			return
+		elseif Value == "peakness" then
+			local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+			local Root = Character:WaitForChild(Attach or "HumanoidRootPart")
+
+			local Att1 = CreateParticle("Attachment", {
+				Name = "1",
+				Parent = Root,
+				Position = Vector3.new(0, -1, 0),
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Big ring",
+				Parent = Att1,
+				Brightness = 2,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				LightEmission = 0,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(13),
+				Texture = "rbxassetid://128389339609442",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 1,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(150),
+				Speed = NumberRange.new(0.005),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/15691415178",
+				Parent = Att1,
+				Brightness = 1,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				LightEmission = -0.01,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(11),
+				Texture = "rbxassetid://100281401469070",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 3,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(30, 30),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookBlendFrames = true,
+				FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			})
+
+			local Att2 = CreateParticle("Attachment", {
+				Name = "2",
+				Parent = Root,
+				Position = Vector3.new(0, 0, 0),
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/384_Sem_Titulo_20241208224902",
+				Parent = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				LightEmission = -5,
+				Orientation = Enum.ParticleOrientation.VelocityPerpendicular,
+				Size = NumberSequence.new(9),
+				Texture = "rbxassetid://140248623110087",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 2,
+				Rotation = NumberRange.new(-360, 360),
+				RotSpeed = NumberRange.new(150),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(45, 45),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "Images/orber",
+				Parent = Att2,
+				Brightness = 2,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				LightEmission = 0,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(10),
+				Texture = "rbxassetid://15441247020",
+				Transparency = NumberSequence.new(0.5),
+				Lifetime = NumberRange.new(1),
+				Rate = 5,
+				Rotation = NumberRange.new(0, 0),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookBlendFrames = true,
+				FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			})
+
+			CreateParticle("ParticleEmitter", {
+				Name = "STAR",
+				Parent = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)),
+				LightEmission = -1,
+				Orientation = Enum.ParticleOrientation.FacingCamera,
+				Size = NumberSequence.new(10),
+				Texture = "rbxassetid://100955378623032",
+				Transparency = NumberSequence.new(0),
+				Lifetime = NumberRange.new(1),
+				Rate = 2,
+				Rotation = NumberRange.new(0, 0),
+				RotSpeed = NumberRange.new(0),
+				Speed = NumberRange.new(0.001),
+				SpreadAngle = Vector2.new(0, 0),
+				LockedToPart = true,
+				VelocityInheritance = 0,
+				Shape = Enum.ParticleEmitterShape.Box,
+				ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+
+			CreateParticle("Trail", {
+				Name = "Images/0a9af0c37a7cceb612a6d4bc0c",
+				Parent = Root,
+				Attachment0 = Att1,
+				Attachment1 = Att2,
+				Brightness = 10,
+				Color = ColorSequence.new(Color3.fromRGB(0, 0, 0)),
+				FaceCamera = true,
+				Texture = "rbxassetid://120245170998484",
+				TextureLength = 1,
+				TextureMode = Enum.TextureMode.Stretch,
+				Transparency = NumberSequence.new(0),
+				Enabled = true,
+				Lifetime = 0.2,
+				MaxLength = 0,
+				MinLength = 0.1,
+				WidthScale = 10,
+			})
+
+			return
+		end
+	end
+
+	API.ResetAura = function(Attach)
+		for _, V in ipairs(LocalPlayer.Character[Attach or "HumanoidRootPart"]:GetDescendants()) do
+			if V:IsA("Attachment") or V:IsA("ParticleEmitter") then
+				V:Destroy()
+			end
+		end
+	end
+
+	API.AntiFlashbang = function(Enabled)
+		local Flashbang = require(LocalPlayer.PlayerScripts.Modules.Items.Flashbang)
+		if not Flashbang._ascidaFlashHooked then
+			Flashbang._ascidaFlashHooked = true
+			local OldReplicateFromServer = Flashbang.ReplicateFromServer
+			Flashbang.ReplicateFromServer = function(Self, Value, ...)
+				if Value == "BlindEffect" and getgenv()._ascidaAntiFlash then
+					return
+				end
+				return OldReplicateFromServer(Self, Value, ...)
+			end
+		end
+		getgenv()._ascidaAntiFlash = Enabled
+	end
+
+	API.GetCurrentWeapon = function()
+		return tostring(Library.FighterController.LocalFighter.EquippedItem)
+	end
+
+	API.OnlyUseRareInspect = function(Enabled)
+		if Enabled then
+			local ViewModel = Library.FighterController.LocalFighter.EquippedItem.ViewModel
+			local Animator = ViewModel.Animator
+			local oldInspect = ViewModel.Inspect
+
+			ViewModel.Inspect = function(self, ...)
+				if Enabled and Animator._rare_inspect_animation then
+					Animator:PlayAnimation(Animator._rare_inspect_animation)
+					return true, true
+				end
+
+				return oldInspect(self, ...)
+			end
+		else
+			local ViewModel = Library.FighterController.LocalFighter.EquippedItem.ViewModel
+			local oldInspect = ViewModel.Inspect
+
+			ViewModel.Inspect = oldInspect
+		end
+	end
+
+	local AvatarEnabled = false
+	local OriginalId = LocalPlayer.UserId
+	local CurrentCharacterConnection = nil
+	local CurrentImageConnection = nil
+
+	local function SpoofUserId(UserId)
+		local OldIndex
+		OldIndex = hookmetamethod(
+			game,
+			"__index",
+			newcclosure(function(Self, Key)
+				if rawequal(Self, LocalPlayer) and Key == "UserId" then
+					return UserId
+				end
+				return OldIndex(Self, Key)
+			end)
+		)
+	end
+
+	local function ApplyImageSpoof(UserId)
+		local HeadshotURL = "https://www.roblox.com/headshot-thumbnail/image?userId="
+			.. UserId
+			.. "&width=420&height=420&format=png"
+
+		for _, V in ipairs(game:GetDescendants()) do
+			if V:IsA("ImageLabel") or V:IsA("ImageButton") then
+				if tostring(V.Image):find(tostring(OriginalId)) then
+					V.Image = HeadshotURL
+				end
+			end
+		end
+
+		if CurrentImageConnection then
+			CurrentImageConnection:Disconnect()
+		end
+
+		CurrentImageConnection = game.DescendantAdded:Connect(function(V)
+			if V:IsA("ImageLabel") or V:IsA("ImageButton") then
+				task.wait()
+				if tostring(V.Image):find(tostring(OriginalId)) then
+					V.Image = HeadshotURL
+				end
+			end
+		end)
+	end
+
+	local function ApplyAvatar(Data)
+		if not AvatarEnabled then
+			return
+		end
+
+		task.spawn(function()
+			pcall(function()
+				local Char = LocalPlayer.Character
+				if not Char then
+					return
+				end
+
+				local Hum = Char:FindFirstChild("Humanoid")
+				if not Hum then
+					return
+				end
+
+				LocalPlayer.CharacterAppearanceId = Data.id
+
+				pcall(function()
+					Char.Name = Data.name
+					Hum.DisplayName = Data.displayName or Data.name
+				end)
+
+				local App
+				local Ok = pcall(function()
+					App = Services.Players:GetCharacterAppearanceAsync(Data.id)
+				end)
+				if not Ok or not App then
+					return
+				end
+
+				SpoofUserId(Data.id)
+				ApplyImageSpoof(Data.id)
+
+				for _, V in ipairs(Char:GetChildren()) do
+					if V:IsA("Accessory") or V:IsA("Shirt") or V:IsA("Pants") or V:IsA("BodyColors") then
+						pcall(function()
+							V:Destroy()
+						end)
+					end
+				end
+
+				for _, V in ipairs(App:GetChildren()) do
+					if V:IsA("Shirt") or V:IsA("Pants") or V:IsA("BodyColors") then
+						pcall(function()
+							V.Parent = Char
+						end)
+					elseif V:IsA("Accessory") then
+						pcall(function()
+							Hum:AddAccessory(V)
+						end)
+					end
+				end
+
+				local Head = Char:WaitForChild("Head", 3)
+				if Head then
+					local OldFace = Head:FindFirstChild("face")
+					if OldFace then
+						OldFace:Destroy()
+					end
+
+					if App:FindFirstChild("face") then
+						App.face.Parent = Head
+					else
+						local Face = Instance.new("Decal")
+						Face.Name = "face"
+						Face.Face = "Front"
+						Face.Texture = "rbxasset://textures/face.png"
+						Face.Parent = Head
+					end
+				end
+
+				local Parent = Char.Parent
+				Char.Parent = nil
+				Char.Parent = Parent
+			end)
+		end)
+	end
+
+	local function BindCharacter(Data)
+		if CurrentCharacterConnection then
+			CurrentCharacterConnection:Disconnect()
+		end
+
+		CurrentCharacterConnection = LocalPlayer.CharacterAdded:Connect(function(Char)
+			local Hum = Char:WaitForChild("Humanoid", 5)
+			if Hum then
+				ApplyAvatar(Data)
+			end
+		end)
+	end
+
+	API.Impersonate = function(Username)
+		task.spawn(function()
+			local Ok, UserId = pcall(function()
+				return Services.Players:GetUserIdFromNameAsync(Username)
+			end)
+			if not Ok or not UserId then
+				return
+			end
+
+			local Ok2, Data = pcall(function()
+				return Services.HttpService:JSONDecode(
+					game:HttpGet("https://users.roblox.com/v1/users/" .. UserId, true)
+				)
+			end)
+			if not Ok2 or not Data or not Data.id then
+				return
+			end
+
+			AvatarEnabled = true
+			BindCharacter(Data)
+
+			if LocalPlayer.Character then
+				ApplyAvatar(Data)
+
+				local Spoofs = Config.Read(Config.Files.Spoofs)
+				Spoofs["Avatar"] = { name = Username }
+				Config.Save(Config.Files.Spoofs, Spoofs)
+			end
+		end)
+	end
+
+	API.StopImpersonating = function()
+		AvatarEnabled = false
+
+		if CurrentCharacterConnection then
+			CurrentCharacterConnection:Disconnect()
+			CurrentCharacterConnection = nil
+		end
+
+		if CurrentImageConnection then
+			CurrentImageConnection:Disconnect()
+			CurrentImageConnection = nil
+		end
+
+		local HeadshotURL = "https://www.roblox.com/headshot-thumbnail/image?userId="
+			.. OriginalId
+			.. "&width=420&height=420&format=png"
+
+		for _, V in ipairs(game:GetDescendants()) do
+			if V:IsA("ImageLabel") or V:IsA("ImageButton") then
+				if tostring(V.Image):find("headshot-thumbnail") then
+					V.Image = HeadshotURL
+				end
+			end
+		end
+
+		pcall(function()
+			LocalPlayer.CharacterAppearanceId = OriginalId
+		end)
+
+		if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+			LocalPlayer.Character.Humanoid.Health = 0
+		end
+
+		local Spoofs = Config.Read(Config.Files.Spoofs)
+		Spoofs["Avatar"] = { name = LocalPlayer.Name }
+		Config.Save(Config.Files.Spoofs, Spoofs)
+	end
+
+	local LootboxOrder = Library.CosmeticLibrary.LootboxOrder
+	local Rewards = Library.CosmeticLibrary.Rewards
+	local Cosmetics = Library.CosmeticLibrary.Cosmetics
+
+	local POOLS = {}
+
+	for _, LootboxName in ipairs(LootboxOrder) do
+		local LootboxData = Rewards[LootboxName]
+		if not LootboxData then
+			continue
+		end
+
+		local Contents = LootboxData.GetContents and LootboxData.GetContents() or {}
+		if #Contents == 0 then
+			continue
+		end
+
+		POOLS[LootboxName] = {}
+
+		for _, ItemName in ipairs(Contents) do
+			local Cosmetic = Cosmetics[ItemName]
+			if Cosmetic then
+				table.insert(POOLS[LootboxName], {
+					Name = ItemName,
+					Rarity = tostring(Cosmetic.Rarity),
+					Weapon = Cosmetic.ItemName,
+				})
+			end
+		end
+	end
+
+	API.Pools = POOLS
+
+	API.InjectToBackpack = function(Item, Quantity)
+		local LootboxEffect = require(LocalPlayer.PlayerScripts.Modules.Functions.LootboxEffect)
+		local CaseName = Item or "Skin Case 3"
+		local RARITY_WEIGHTS = { Mythical = 3, Legendary = 10, Rare = 25, Common = 65 }
+
+		local function OpenCase(What, Amount)
+			local Char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+			local HRP = Char:WaitForChild("HumanoidRootPart")
+			local Pool = POOLS[What] or POOLS["Skin Case 3"]
+			if not Pool then
+				return
+			end
+
+			Amount = Amount or 1
+
+			for I = 1, Amount do
+				local Available = {}
+				for _, ItemData in ipairs(Pool) do
+					if not UnlockedItems[ItemData.Name] then
+						table.insert(Available, ItemData)
+					end
+				end
+				if #Available == 0 then
+					Available = Pool
+				end
+
+				local Weighted = {}
+				for _, ItemData in ipairs(Available) do
+					local W = RARITY_WEIGHTS[ItemData.Rarity] or 10
+					for _ = 1, W do
+						table.insert(Weighted, ItemData)
+					end
+				end
+
+				local Picked = Weighted[math.random(1, #Weighted)]
+				API.UnlockSpecificCosmetic(Picked.Name)
+
+				local PickedName = Picked.Name
+				local PickedWeapon = Picked.Weapon
+				task.spawn(function()
+					task.wait(0.1 * I)
+					pcall(
+						LootboxEffect,
+						HRP.Position,
+						What,
+						{ { RewardData = { Name = PickedName, Weapon = PickedWeapon } } },
+						0,
+						LocalPlayer.Character.HumanoidRootPart,
+						LocalPlayer
+					)
+					API.AddNotificationToWeapon(PickedName, PickedWeapon)
+				end)
+			end
+		end
+
+		if not API._ascidaInjectHooked then
+			API._ascidaInjectHooked = true
+
+			local PendingCase = nil
+			local PendingQty = 1
+
+			local function WatchObject(Obj)
+				if not (Obj:IsA("TextLabel") or Obj:IsA("TextButton")) then
+					return
+				end
+
+				local function Check()
+					if Obj.Text ~= "Failed to open, you probably already have everything!" then
+						return
+					end
+
+					for _, V in pairs(LocalPlayer.PlayerGui:GetDescendants()) do
+						if (V:IsA("Frame") or V:IsA("ScrollingFrame")) and V.Visible then
+							if V.AbsoluteSize.X > 50 and V.AbsoluteSize.Y > 50 and V.BackgroundTransparency < 1 then
+								V.Visible = false
+							end
+						end
+					end
+
+					pcall(function()
+						Obj.Parent:Destroy()
+					end)
+
+					local OpenedCase = PendingCase or CaseName
+					local OpenedQty = PendingQty or 1
+
+					PendingCase = nil
+					PendingQty = 1
+
+					task.spawn(function()
+						OpenCase(OpenedCase, OpenedQty)
+					end)
+				end
+
+				Check()
+				Obj:GetPropertyChangedSignal("Text"):Connect(Check)
+			end
+
+			for _, Obj in pairs(game:GetDescendants()) do
+				WatchObject(Obj)
+			end
+
+			game.DescendantAdded:Connect(function(Obj)
+				WatchObject(Obj)
+			end)
+
+			API._SetPending = function(Name, Qty)
+				PendingCase = Name
+				PendingQty = Qty or 1
+			end
+		end
+
+		API._SetPending(CaseName, Quantity or 1)
+
+		local UnclaimedRewards = Library.PlayerDataController:Get("UnclaimedRewards")
+		table.insert(UnclaimedRewards, { Name = CaseName, Quantity = Quantity or 1 })
+		API.Replicate()
+	end
+
+	task.spawn(function()
+		WrapController = require(LocalPlayer.PlayerScripts.Controllers.WrapController)
+		WrapTextures = PlayerScripts.Assets:WaitForChild("WrapTextures")
+
+		local OrigApplyWrap = WrapController.ApplyWrap
+
+		WrapController.ApplyWrap = function(Self, P1, P2, P3, P4)
+			if CustomWrapEnabled and P2 and P2.Name ~= "RANDOM_COSMETIC" then
+				local WrapData = Library.CosmeticLibraryCosmetics[P2.Name]
+				if WrapData and WrapData.WrapGroups then
+					local CustomWrapData = {}
+					for K, V in pairs(WrapData) do
+						CustomWrapData[K] = V
+					end
+
+					local CustomGroups = {}
+					for GroupId, GroupData in pairs(WrapData.WrapGroups) do
+						local NewGroup = {}
+						for K, V in pairs(GroupData) do
+							NewGroup[K] = V
+						end
+						NewGroup.Textures = "CustomWrap"
+						CustomGroups[GroupId] = NewGroup
+					end
+					CustomWrapData.WrapGroups = CustomGroups
+
+					Library.CosmeticLibrary.Cosmetics[P2.Name] = CustomWrapData
+					local Result = OrigApplyWrap(Self, P1, P2, P3, P4)
+					Library.CosmeticLibrary.Cosmetics[P2.Name] = WrapData
+					return Result
+				end
+			end
+			return OrigApplyWrap(Self, P1, P2, P3, P4)
+		end
+	end)
+
+	API.UnapplyCustomWrap = function()
+		CustomWrapEnabled = false
+	end
+
+	API.ApplyCustomWrap = function(URL)
+		local Path = "ascida/wraps/custom.png"
+
+		if not isfolder("ascida") then
+			makefolder("ascida")
+		end
+		if not isfolder("ascida/wraps") then
+			makefolder("ascida/wraps")
+		end
+
+		local Ok, WrapData = pcall(function()
+			return game:HttpGet(URL)
+		end)
+		if not Ok or not WrapData then
+			return
+		end
+
+		writefile(Path, WrapData)
+		local TextureId = getcustomasset(Path)
+
+		if WrapTextures then
+			local Old = WrapTextures:FindFirstChild("CustomWrap")
+			if Old then
+				Old:Destroy()
+			end
+
+			local CustomFolder = Instance.new("Folder")
+			CustomFolder.Name = "CustomWrap"
+			CustomFolder.Parent = WrapTextures
+
+			for _ = 1, 6 do
+				local Tex = Instance.new("Texture")
+				Tex.Name = "Gradient"
+				Tex.Texture = TextureId
+				Tex.Parent = CustomFolder
+			end
+		end
+
+		CustomWrapEnabled = true
+	end
+
+	API.RenameWeapon = function(Weapon, NewName)
+		local Genv = getgenv()
+		Genv.weaponData = Genv.weaponData or {}
+
+		if not Genv.weaponData[Weapon] then
+			Genv.weaponData[Weapon] = { new = NewName, tracked = {} }
+
+			local WeaponEntry = Genv.weaponData[Weapon]
+
+			local function Track(Obj)
+				if Obj:IsA("TextLabel") or Obj:IsA("TextButton") then
+					if Obj.Text == Weapon then
+						table.insert(WeaponEntry.tracked, Obj)
+						Obj.Text = WeaponEntry.new
+					end
+				end
+			end
+
+			local function UpdateTracked()
+				for I = #WeaponEntry.tracked, 1, -1 do
+					local Obj = WeaponEntry.tracked[I]
+					if Obj and Obj.Parent then
+						Obj.Text = WeaponEntry.new
+					else
+						table.remove(WeaponEntry.tracked, I)
+					end
+				end
+			end
+
+			for _, V in ipairs(game:GetDescendants()) do
+				Track(V)
+			end
+
+			game.DescendantAdded:Connect(Track)
+
+			coroutine.wrap(function()
+				local Last = WeaponEntry.new
+				while true do
+					task.wait(0.5)
+					if WeaponEntry.new ~= Last then
+						Last = WeaponEntry.new
+						UpdateTracked()
+					end
+				end
+			end)()
+		else
+			Genv.weaponData[Weapon].new = NewName
+		end
+	end
+
+	API.GetCameraStates = function()
+		local CC = require(PlayerScripts.Controllers.CameraController)
+
+		local States = {}
+		for k, v in pairs(CC.CameraState.States) do
+			States[k] = v
+		end
+
+		return States
+	end
+
+	API.SetCameraState = function(State)
+		local CC = require(PlayerScripts.Controllers.CameraController)
+
+		CC.CameraState:_SetState(CC.CameraState.States[State])
+	end
+
+	API.GetWeapons = function(EnableNil)
+		local Items = {}
+
+		if EnableNil then
+			table.insert(Items, "None")
+		end
+
+		for Name in pairs(Library.ItemLibrary.Items) do
+			table.insert(Items, Name)
+		end
+
+		table.sort(Items)
+
+		return Items
+	end
+
+	API.GetEnums = function(Enum)
+		local EnumsList = {}
+
+		for _, v in ipairs(Enum:GetEnumItems()) do
+			table.insert(EnumsList, v.Name)
+		end
+
+		return EnumsList
+	end
+
+	API.GetCosmetics = function()
+		local CosmeticsList = {}
+
+		for Name in pairs(Library.CosmeticLibrary.Cosmetics) do
+			table.insert(CosmeticsList, Name)
+		end
+
+		table.sort(CosmeticsList)
+
+		return CosmeticsList
+	end
+
+	API.IsRealSomething = function(Value)
+		local Val = tostring(Value):lower()
+
+		for _, Name in ipairs(API.GetWeapons()) do
+			if Val == tostring(Name):lower() then
+				return true
+			end
+		end
+
+		for _, Name in ipairs(API.GetCosmetics()) do
+			if Val == tostring(Name):lower() then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	API.SetViewModelOffset = function(X, Y, Z)
+		for name, info in pairs(Library.ItemLibrary.ViewModels) do
+			if info.RootPartOffset then
+				info.RootPartOffset = info.RootPartOffset * CFrame.new(X or 0, Y or 0, Z or 0)
+			end
+		end
+	end
+
+	API.Initialize = function()
+		for _, V in ipairs(Library.ItemLibrary.Items) do
+			for _, I in ipairs({ "Skin", "Wrap", "Charm", "Finisher" }) do
+				API.Equip(V, I, "None", {})
+			end
+		end
+
+		API.SpoofProfile()
+		API.UnlockCosmetics()
+		API.HookWeaponData()
+		API.HookRemote()
+		API.SpoofViewModelImage()
+		API.HookViewModel()
+		API.UnlockInventory()
+		API.LoadConfig()
+		API.Replicate()
+
+		local Modules = Services.ReplicatedStorage:WaitForChild("Modules")
+		local Controllers = PlayerScripts:WaitForChild("Controllers")
+
+		local EmoteCtrl = require(Controllers:WaitForChild("EmoteController", 10))
+
+		local CurrentEmote = nil
+		local EmoteBool = Instance.new("BoolValue")
+		EmoteBool.Value = false
+
+		local function StopCurrentEmote()
+			if not CurrentEmote or CurrentEmote._destroyed then
+				return
+			end
+			for _, Track in pairs(CurrentEmote._animation_tracks or {}) do
+				pcall(function()
+					Track:Stop(0)
+					Track:Destroy()
+				end)
+			end
+			CurrentEmote._animation_tracks = {}
+			pcall(function()
+				CurrentEmote:Destroy()
+			end)
+			CurrentEmote = nil
+		end
+
+		EmoteCtrl.UseEmote = function(Self, Slot)
+			local Emotes = Library.PlayerDataController:Get("EquippedEmotes")
+			local EmoteData = Emotes and Emotes[Slot]
+			local EmoteName = type(EmoteData) == "table" and EmoteData.Name or EmoteData
+			if not EmoteName then
+				return
+			end
+
+			LocalPlayer.Character.Humanoid.WalkSpeed = 5
+
+			local EmoteModule = require(Modules.Emotes:FindFirstChild(EmoteName))
+			local Humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if not Humanoid then
+				return
+			end
+
+			StopCurrentEmote()
+
+			local EmoteInstance = EmoteModule.new(Humanoid)
+			CurrentEmote = EmoteInstance
+			EmoteBool.Value = true
+			EmoteInstance:PlayClient()
+
+			local EmoteConnections = {}
+			local function CancelEmote()
+				for _, Conn in pairs(EmoteConnections) do
+					Conn:Disconnect()
+				end
+				StopCurrentEmote()
+				EmoteBool.Value = false
+			end
+
+			EmoteConnections[1] = Humanoid.Jumping:Connect(function(Active)
+				if Active then
+					CancelEmote()
+				end
+			end)
+
+			EmoteInstance.Destroying:Connect(function()
+				for _, Conn in pairs(EmoteConnections) do
+					Conn:Disconnect()
+				end
+				if CurrentEmote == EmoteInstance then
+					CurrentEmote = nil
+				end
+			end)
+		end
+
+		local CameraController = require(LocalPlayer.PlayerScripts.Controllers.CameraController)
+
+		EmoteBool:GetPropertyChangedSignal("Value"):Connect(function()
+			CameraController:SetThirdPersonOverride(EmoteBool.Value)
+			CameraController.CameraState:TogglePOV()
+		end)
+
+		API.LoadConfig()
+		API.Replicate()
+	end
+end
+
+-- // UI \\ --
+local UI = {}
+getgenv().UI = UI
+do
+    UI.Library, UI.SaveManager, UI.ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua"))(), loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/SaveManager.lua"))(), loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/ThemeManager.lua"))()
+
+	UI.Window = UI.Library:CreateWindow({
+		["Title"] = "Ascida",
+		["Footer"] = "dsc.gg/luafans",
+		["ToggleKeybind"] = Enum.KeyCode.RightShift,
+		["GlobalSearch"] = true,
+		["Font"] = Enum.Font.Kalam,
+	})
+
+	UI.Storage = {}
+
+	UI.Options = UI.Library.Options
+	UI.Toggles = UI.Library.Toggles
+
+	UI.Tabbox = nil
+	UI.Groupbox = nil
+	UI.Dependency = nil
+
+	UI.Notify = function(Text, Description, Timeout)
+		UI.Library:Notify({
+			Title = Text,
+			Description = Description,
+			Time = Timeout or 4,
+		})
+	end
+
+	UI.CreateDropdown = function(Text, Values, Callback, Default, Multi, Dependency)
+		local Groupbox = Dependency or UI.Groupbox
+		return Groupbox:AddDropdown(string.lower(Text), {
+			Text = Text,
+			Values = Values,
+			Default = Default or 0,
+			Multi = Multi or false,
+			Callback = Callback,
+		})
+	end
+
+	UI.CreateToggle = function(Text, Callback, Default, Tooltip, Dependency)
+		local Groupbox = Dependency or UI.Groupbox
+		return Groupbox:AddToggle(string.lower(Text), {
+			Text = Text,
+			Default = Default or false,
+			Callback = Callback,
+			Tooltip = Tooltip or "Visual only",
+		})
+	end
+
+	UI.CreateInput = function(Text, Callback, Placeholder, Default, Numeric, Dependency)
+		local Groupbox = Dependency or UI.Groupbox
+		return Groupbox:AddInput(string.lower(Text), {
+			Text = Text,
+			Callback = Callback,
+			Placeholder = Placeholder or "",
+			Default = Default or "",
+			Numeric = Numeric or false,
+		})
+	end
+
+	UI.CreateSlider = function(Text, Default, Min, Max, Rounding, Callback, Dependency)
+		local Groupbox = Dependency or UI.Groupbox
+		return Groupbox:AddSlider(string.lower(Text), {
+			Text = Text,
+			Default = Default,
+			Min = Min,
+			Max = Max,
+			Rounding = Rounding,
+			Callback = Callback,
+		})
+	end
+
+	UI.Tabs = {
+		["Weapons"] = UI.Window:AddTab("Weapons", "swords"),
+		["Cosmetics"] = UI.Window:AddTab("Cosmetics", "sparkles"),
+		["Spoofer"] = UI.Window:AddTab("Spoofer", "user-round-cog"),
+		["Inventory"] = UI.Window:AddTab("Inventory", "package"),
+		["World"] = UI.Window:AddTab("World", "earth"),
+		["Configuration"] = UI.Window:AddTab("Configuration", "cog"),
+	}
+
+	UI.Groupbox = UI.Tabs.Weapons:AddLeftGroupbox("Weapon Name Editor", "pen")
+
+	do
+		UI.Storage["RW_Enabled"] = false
+		UI.Storage["RW_Weapon"] = "Assault Rifle"
+		UI.Storage["RW_Name"] = "Assault Rifle"
+
+		local Callback = function()
+			if UI.Storage["RW_Enabled"] then
+				if API.IsRealSomething(UI.Storage["RW_Name"]) then
+					UI.Notify("Ascida", "Renamed " .. UI.Storage["RW_Weapon"] .. " to " .. UI.Storage["RW_Name"])
+					API.RenameWeapon(UI.Storage["RW_Weapon"], UI.Storage["RW_Name"])
+				end
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["RW_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["RW_Weapon"] = value
+
+			Callback()
+		end, 1)
+
+		UI.CreateInput("New Name", function(value)
+			UI.Storage["RW_Name"] = value
+
+			Callback()
+		end, "...", "")
+	end
+
+	UI.Groupbox = UI.Tabs.Weapons:AddLeftGroupbox("Weapon Class Editor", "list")
+
+	do
+		UI.Storage["WC_Enabled"] = false
+		UI.Storage["WC_Weapon"] = "Assault Rifle"
+		UI.Storage["WC_Class"] = "Primary"
+
+		local Callback = function()
+			if UI.Storage["WC_Enabled"] then
+				UI.Notify("Ascida", "Set " .. UI.Storage["WC_Weapon"] .. "'s class " .. UI.Storage["WC_Class"])
+				API.SetClassOfWeapon(UI.Storage["WC_Weapon"], UI.Storage["WC_Class"])
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["WC_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["WC_Weapon"] = value
+
+			Callback()
+		end, 1)
+
+		UI.CreateDropdown("Class", {
+			"Primary",
+			"Secondary",
+			"Melee",
+			"Utility",
+		}, function(value)
+			UI.Storage["WC_Class"] = value
+
+			Callback()
+		end, 1)
+	end
+
+	UI.Groupbox = UI.Tabs.Weapons:AddRightGroupbox("Weapon Status Editor", "swords")
+
+	do
+		UI.Storage["WS_Enabled"] = false
+		UI.Storage["WS_Weapon"] = "Assault Rifle"
+		UI.Storage["WS_Status"] = "Standart"
+
+		local Callback = function()
+			if UI.Storage["WS_Enabled"] then
+				UI.Notify("Ascida", "Set " .. UI.Storage["WS_Weapon"] .. "'s status " .. UI.Storage["WS_Status"])
+				API.ChangeStatusOfWeapon(UI.Storage["WS_Weapon"], UI.Storage["WS_Status"])
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["WS_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["WS_Weapon"] = value
+
+			Callback()
+		end, 1)
+
+		UI.CreateDropdown("Status", {
+			"Standart",
+			"Prime",
+			"Contraband",
+		}, function(value)
+			UI.Storage["WS_Status"] = value
+
+			Callback()
+		end, 1)
+	end
+
+	UI.Groupbox = UI.Tabs.Weapons:AddRightGroupbox("Weapon Image Editor", "image")
+
+	do
+		UI.Storage["WI_Enabled"] = false
+		UI.Storage["WI_Weapon"] = "Assault Rifle"
+		UI.Storage["WI_Image"] = "Assault Rifle"
+
+		local Callback = function()
+			if UI.Storage["WI_Enabled"] then
+				if API.IsRealSomething(UI.Storage["WI_Image"]) then
+					UI.Notify("Ascida", "Set " .. UI.Storage["WI_Weapon"] .. "'s image to " .. UI.Storage["WI_Image"])
+					API.SpoofViewModelImageCustom(UI.Storage["WI_Weapon"], UI.Storage["WI_Image"])
+				end
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["WI_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["WI_Weapon"] = value
+
+			Callback()
+		end, 1)
+
+		UI.CreateInput("Image", function(value)
+			UI.Storage["WI_Image"] = value
+
+			Callback()
+		end, "... eg. AK-47 / Sniper", "")
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("View Model", "minus")
+
+	do
+		UI.Storage["V_Enabled"] = false
+		UI.Storage["V_OffsetX"] = 0
+		UI.Storage["V_OffsetY"] = 0
+		UI.Storage["V_OffsetZ"] = 0
+
+		UI.CreateToggle("Only Use Rare Inspects", function(value)
+			API.OnlyUseRareInspect(value)
+		end, false)
+
+		UI.CreateToggle("Handicap", function(value)
+			API.SetHandicaps(value)
+
+			UI.Notify("Ascida", value and "Enabled" or "Disabled" .. " handicap!")
+		end, false)
+
+		UI.CreateDropdown("Camera Mode", API.GetCameraStates(), function(value)
+			API.SetCameraState(tostring(value))
+
+			UI.Notify("Ascida", "Set camera mode to: " .. tostring(value) .. "!")
+		end, 1, false)
+
+		UI.Groupbox:AddDivider()
+
+		UI.CreateToggle("Enable ViewModel", function(value)
+			UI.Storage["V_Enabled"] = value
+		end, false)
+
+		UI.CreateSlider("ViewModel Offset X", 0, 0, 100, 0, function(value)
+			if not UI.Storage["V_Enabled"] then
+				return
+			end
+
+			UI.Storage["V_OffsetX"] = value
+
+			API.SetViewModelOffset(UI.Storage["V_OffsetX"], UI.Storage["V_OffsetY"], UI.Storage["V_OffsetZ"])
+		end)
+
+		UI.CreateSlider("ViewModel Offset Y", 0, 0, 100, 0, function(value)
+			if not UI.Storage["V_Enabled"] then
+				return
+			end
+
+			UI.Storage["V_OffsetY"] = value
+
+			API.SetViewModelOffset(UI.Storage["V_OffsetX"], UI.Storage["V_OffsetY"], UI.Storage["V_OffsetZ"])
+		end)
+
+		UI.CreateSlider("ViewModel Offset Z", 0, 0, 100, 0, function(value)
+			if not UI.Storage["V_Enabled"] then
+				return
+			end
+
+			UI.Storage["V_OffsetZ"] = value
+
+			API.SetViewModelOffset(UI.Storage["V_OffsetX"], UI.Storage["V_OffsetY"], UI.Storage["V_OffsetZ"])
+		end)
+	end
+
+	do
+		UI.Storage.CustomSounds = {
+			SHOOT = { Enabled = false, Original = false, Id = "", Volume = 1, Pitch = 1 },
+			FINISH = { Enabled = false, Original = false, Id = "", Volume = 1, Pitch = 1 },
+			RELOAD = { Enabled = false, Original = false, Id = "", Volume = 1, Pitch = 1 },
+		}
+
+		local function CreateSoundTab(Icon, Key, Search)
+			UI.Groupbox = UI.Tabs.Weapons:AddRightGroupbox(
+				"Custom " .. Key:sub(1, 1):upper() .. Key:sub(2):lower() .. " Sound",
+				Icon
+			)
+			UI.Groupbox:AddDivider(Key)
+
+			local DropdownId = "presets " .. Key:lower()
+			local Hooked = false
+
+			UI.CreateToggle("Enabled " .. Key, function(Value)
+				UI.Storage.CustomSounds[Key].Enabled = Value
+				if not Hooked then
+					Hooked = true
+					local Searches = type(Search) == "table" and Search or { Search }
+					for _, S in ipairs(Searches) do
+						API.SpoofSound(UI.Storage.CustomSounds[Key], S)
+					end
+				end
+			end, false)
+
+			UI.Groupbox:AddDropdown(DropdownId, {
+				Text = "Presets",
+				Values = {
+					"uwu",
+					"vine boom",
+					"lightning struck",
+					"zeus",
+					"bruh",
+					"minecraft hurt",
+					"airhorn",
+					"among us",
+					"fart",
+					"windows xp error",
+					"nuh uh",
+					"URL",
+					"ID",
+				},
+				Default = 0,
+				Multi = false,
+				Callback = function(Value)
+					local Soundboard = {
+						["uwu"] = "rbxassetid://139219844119994",
+						["vine boom"] = "rbxassetid://139627007494605",
+						["lightning struck"] = "rbxassetid://93403424380357",
+						["bruh"] = "rbxassetid://5044897021",
+						["fart"] = "rbxassetid://6695903063",
+						["windows xp error"] = "rbxassetid://1626996526",
+						["among us"] = "rbxassetid://6486359635",
+						["airhorn"] = "rbxassetid://9125718001",
+						["minecraft hurt"] = "rbxassetid://6361963422",
+						["zeus"] = "rbxassetid://4702564143",
+						["nuh uh"] = "rbxassetid://7214858019",
+					}
+
+					if Soundboard[Value] then
+						UI.Storage.CustomSounds[Key].Id = Soundboard[Value]
+						UI.Notify("Ascida", "Choosed '" .. Key .. "' for " .. Value)
+					end
+				end,
+			})
+
+			UI.Dependency = UI.Groupbox:AddDependencyBox()
+			UI.Dependency:AddInput("url " .. Key, {
+				Text = "URL",
+				Callback = function(Value)
+					UI.Storage.CustomSounds[Key].Id =
+						API.DownloadAsset("ascida/sounds/" .. tostring(math.random(1, 10000)), Value)
+				end,
+				Placeholder = "https://...",
+				Default = "",
+			})
+			UI.Dependency:SetupDependencies({ { UI.Options[DropdownId], "URL" } })
+
+			UI.Dependency = UI.Groupbox:AddDependencyBox()
+			UI.Dependency:AddInput("id " .. Key, {
+				Text = "ID",
+				Callback = function(Value)
+					UI.Storage.CustomSounds[Key].Id = Value
+				end,
+				Placeholder = "rbxassetid://...",
+				Default = "",
+			})
+			UI.Dependency:SetupDependencies({ { UI.Options[DropdownId], "ID" } })
+
+			UI.CreateSlider("Volume " .. Key, 1, 0, 10, 1, function(Value)
+				UI.Storage.CustomSounds[Key].Volume = Value or 1
+			end)
+
+			UI.CreateSlider("Pitch " .. Key, 1, 0, 10, 1, function(Value)
+				UI.Storage.CustomSounds[Key].Pitch = Value or 1
+			end)
+		end
+
+		CreateSoundTab("flame", "SHOOT", { "release", "fire", "charge", "shot", "shoot" })
+		CreateSoundTab("trophy", "FINISH", { "end", "kill", "finish" })
+		CreateSoundTab("refresh-ccw", "RELOAD", { "re", "reload" })
+	end
+
+	UI.Groupbox = UI.Tabs.Weapons:AddLeftGroupbox("Switch Animations", "gamepad-directional")
+
+	do
+		UI.Storage["SA_Enabled"] = false
+		UI.Storage["SA_Cosmetic"] = "Pixel Sniper"
+		UI.Storage["SA_Weapon"] = "Assault Rifle"
+
+		local Callback = function()
+			if not UI.Storage["WBT_Enabled"] then
+				return
+			end
+
+			if UI.Storage["WBT_Value"] == "None" then
+				API.SwapAnimations(UI.Storage["SA_Weapon"], UI.Storage["SA_Cosmetic"])
+				UI.Notify("Ascida", "Swapped!")
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["SA_Enabled"] = false
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(true), function(value)
+			UI.Storage["SA_Weapon"] = value
+
+			Callback()
+		end, 0)
+
+		UI.CreateInput("Cosmetic", function(value)
+			UI.Storage["SA_Cosmetic"] = value
+
+			Callback()
+		end, "e.g Skin, Pixel Sniper", "", false)
+	end
+
+	--[[
+	UI.Groupbox = UI.Tabs.Weapons:AddLeftGroupbox("Equip Unobtainable Weapon", "crosshair")
+
+	do
+		UI.Storage["EOW_Weapon"] = "Assault Rifle"
+		UI.Storage["EOW_Swap"] = "Scepter"
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["EOW_Weapon"] = value
+		end, 1, false)
+
+		local camera = Instance.new("Camera")
+		local player = API.GetLocalPlayer()
+		local playerScripts = player:FindFirstChild("PlayerScripts")
+		local unobtainableFolder = playerScripts
+			:FindFirstChild("Assets")
+			:FindFirstChild("ViewModels")
+			:FindFirstChild("Weapons")
+			:FindFirstChild("Unobtainable")
+
+		local Viewport = UI.Groupbox:AddViewport("ViewWeapon", {
+			Object = unobtainableFolder:FindFirstChild("Scepter"),
+			Camera = camera,
+			Interactive = true,
+			AutoFocus = false,
+			Height = 100,
+		})
+
+		Viewport:Focus()
+
+		UI.CreateDropdown("Unobtainable Weapon", {
+			"Scepter",
+			"Glass Cannon",
+			"Glast Shard",
+			"Elixir",
+		}, function(value)
+			UI.Storage["EOW_Swap"] = value
+
+			local weapon = unobtainableFolder:FindFirstChild(value)
+			if weapon then
+				Viewport:SetObject(weapon)
+				Viewport:Focus()
+			end
+		end, 1, false)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Swap", function()
+			local W = UI.Storage["EOW_Weapon"]
+			local UW = UI.Storage["EOW_Swap"]
+
+			if not W or not UW then
+				UI.Notify("Ascida", "Select both weapons first!")
+				return
+			end
+
+			API.SwapWeaponsWithUnobtainable(W, UW)
+			UI.Notify("Ascida", "Swapped " .. W .. " with " .. UW .. "!")
+		end)
+
+		UI.Groupbox:AddButton("Revert Swap", function()
+			API.UnswapWeaponsWithUnobtainable(UI.Storage["EOW_Weapon"])
+			UI.Notify(
+				"Ascida",
+				"Reverted swap for " .. (UI.Storage["EOW_Weapon"] or "unknown") .. "! (Restart script!)"
+			)
+		end)
+	end]]
+
+	UI.Groupbox = UI.Tabs.Cosmetics:AddLeftGroupbox("Unlock By Rarity", "layers")
+
+	do
+		UI.Storage["UBR_Cosmetics"] = {}
+		UI.Storage["UBR_Included"] = {}
+
+		local Callback = function(Action)
+			local Fn = Action == "Unlock" and API.UnlockCosmeticsByRarity or API.LockCosmeticsByRarity
+			local Count = 0
+
+			for Rarity, RaritySelected in pairs(UI.Storage["UBR_Cosmetics"]) do
+				if RaritySelected then
+					local AnyInclude = false
+					for Include, IncludeSelected in pairs(UI.Storage["UBR_Included"]) do
+						if IncludeSelected then
+							AnyInclude = true
+							Fn(Rarity, Include)
+							Count += 1
+						end
+					end
+					if not AnyInclude then
+						Fn(Rarity)
+						Count += 1
+					end
+				end
+			end
+
+			UI.Notify("Ascida", Action .. "ed " .. Count .. " combinations!")
+		end
+
+		UI.CreateDropdown("Rarity", {
+			"Unobtainable",
+			"Mythical",
+			"Legendary",
+			"Epic",
+			"Rare",
+			"Common",
+			"Unique",
+		}, function(value)
+			UI.Storage["UBR_Cosmetics"] = value
+		end, 0, true)
+
+		UI.CreateDropdown("Include", {
+			"Skin",
+			"Wrap",
+			"Charm",
+			"Finisher",
+			"Emote",
+		}, function(value)
+			UI.Storage["UBR_Included"] = value
+		end, 0, true)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Unlock", function()
+			Callback("Unlock")
+		end)
+
+		UI.Groupbox:AddButton("Lock", function()
+			Callback("Lock")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Cosmetics:AddRightGroupbox("Unlock Specific Cosmetic", "pen")
+
+	do
+		UI.Storage["USC_CosmeticName"] = ""
+
+		local Callback = function(Type)
+			local IsEmpty = function(value)
+				return value == "" or value == nil
+			end
+
+			if not IsEmpty(Type) and not IsEmpty(UI.Storage["USC_CosmeticName"]) then
+				API[Type .. "SpecificCosmetic"](UI.Storage["USC_CosmeticName"])
+				UI.Notify("Ascida", Type .. "ed " .. UI.Storage["USC_CosmeticName"] .. " successfully!")
+			else
+				UI.Notify("Ascida", "Cosmetic Name can't be empty!")
+			end
+		end
+
+		UI.CreateInput("Cosmetic Name", function(value)
+			UI.Storage["USC_CosmeticName"] = value
+		end, "e.g AK-47", "", false)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Unlock Specific", function()
+			Callback("Unlock")
+		end)
+
+		UI.Groupbox:AddButton("Lock Specific", function()
+			Callback("Lock")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Cosmetics:AddLeftGroupbox("Rank Charm", "gem")
+
+	do
+		UI.Storage["RC_Enabled"] = false
+		UI.Storage["RC_Season"] = "Season 1"
+		UI.Storage["RC_Charm"] = "Archnemesis"
+
+		local Viewport
+		local Callback = function()
+			local Season = UI.Storage["RC_Season"]
+			local Charm = UI.Storage["RC_Charm"]
+			local Player = API.GetLocalPlayer()
+			local Charms = Player:FindFirstChild("PlayerScripts").Assets.Charms
+
+			if UI.Storage["RC_Enabled"] then
+				UI.Notify("Ascida", "Unlocked " .. Charm .. "!")
+				API.UnlockRankCharm(Charm, Season)
+			end
+
+			if Viewport then
+				local BackupFolder = Charms:FindFirstChild("__Backup__" .. Season)
+				local PreviewObj
+
+				if BackupFolder and BackupFolder:FindFirstChild(Charm) then
+					PreviewObj = BackupFolder[Charm]
+				else
+					PreviewObj = Charms[Season].Extra[Charm]
+				end
+
+				Viewport:SetObject(PreviewObj)
+				Viewport:Focus()
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["RC_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Season", {
+			"Season 0",
+			"Season 1",
+		}, function(value)
+			UI.Storage["RC_Season"] = value
+
+			Callback()
+		end, 2, false)
+
+		UI.CreateDropdown("Rank Charm", {
+			"Archnemesis",
+			"Nemesis",
+			"Gold 1",
+			"Gold 2",
+			"Gold 3",
+			"Platinum 1",
+			"Platinum 2",
+			"Platinum 3",
+			"Diamond 1",
+			"Diamond 2",
+			"Diamond 3",
+			"Onyx 1",
+			"Onyx 2",
+			"Onyx 3",
+			"Silver 1",
+			"Silver 2",
+			"Silver 3",
+			"Bronze 1",
+			"Bronze 2",
+			"Bronze 3",
+			"Unranked",
+		}, function(value)
+			UI.Storage["RC_Charm"] = value
+
+			Callback()
+		end, 1, false)
+
+		Viewport = UI.Groupbox:AddViewport("rc_viewport", {
+			Object = API.GetLocalPlayer()
+				:FindFirstChild("PlayerScripts").Assets.Charms[UI.Storage["RC_Season"]].Extra[UI.Storage["RC_Charm"]],
+			Camera = Instance.new("Camera"),
+			Interactive = true,
+			AutoFocus = true,
+			Height = 200,
+		})
+	end
+
+	UI.Groupbox = UI.Tabs.Cosmetics:AddRightGroupbox("Equip By Name", "gamepad-2")
+
+	do
+		UI.Storage["EBN_Enabled"] = false
+		UI.Storage["EBN_Weapon"] = "Assault Rifle"
+		UI.Storage["EBN_CosmeticType"] = "Skin"
+		UI.Storage["EBN_CosmeticName"] = ""
+		UI.Storage["EBN_Inverted"] = false
+
+		local Callback = function()
+			if not UI.Storage["EBN_Enabled"] or UI.Storage["EBN_CosmeticName"] == "" then
+				return
+			end
+			if not API.IsRealSomething(UI.Storage["EBN_CosmeticName"]) then
+				return
+			end
+
+			UI.Notify(
+				"Ascida",
+				"Equipped " .. UI.Storage["EBN_Weapon"] .. " on " .. UI.Storage["EBN_CosmeticName"] .. "!"
+			)
+			API.Equip(UI.Storage["EBN_Weapon"], UI.Storage["EBN_CosmeticType"], UI.Storage["EBN_CosmeticName"], {
+				IsInverted = UI.Storage["EBN_Inverted"],
+			})
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["EBN_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["EBN_Weapon"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateDropdown("Cosmetic Type", {
+			"Skin",
+			"Wrap",
+			"Charm",
+			"Finisher",
+		}, function(value)
+			UI.Storage["EBN_CosmeticType"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateInput("Cosmetic Name", function(value)
+			UI.Storage["EBN_CosmeticName"] = value
+
+			Callback()
+		end, "e.g Vexel", "AK-47", false)
+
+		UI.Dependency = UI.Groupbox:AddDependencyBox()
+
+		UI.CreateToggle("Inverted", function(value)
+			UI.Storage["EBN_Inverted"] = value
+		end, false, UI.Dependency)
+
+		UI.Dependency:SetupDependencies({
+			{ UI.Options["cosmetic type"], "Wrap" },
+		})
+	end
+
+	UI.Groupbox = UI.Tabs.Cosmetics:AddRightGroupbox("Custom Wrap", "view")
+
+	do
+		UI.Storage["CW_ID"] = nil
+
+		UI.CreateInput("URL", function(value)
+			UI.Storage["CW_ID"] = value
+		end, "https://...", "", false)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Apply", function()
+			if UI.Storage["CW_ID"] == "" or UI.Storage["CW_ID"] == nil then
+				UI.Notify("Ascida", "Custom Wrap URL can't be empty!")
+				return
+			end
+
+			UI.Notify("Ascida", "Custom wrap applied successfully!")
+			API.ApplyCustomWrap(UI.Storage["CW_ID"])
+		end)
+
+		UI.Groupbox:AddButton("Unapply", function()
+			API.UnapplyCustomWrap()
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Identity Spoofer", "user")
+
+	do
+		UI.Storage.Impersonation = {
+			Username = nil,
+		}
+
+		UI.CreateInput("Victim's Username", function(value)
+			UI.Storage.Impersonation.Username = value
+
+			if UI.Storage.Impersonation.Username == "" then
+				API.StopImpersonating()
+				API.GetLocalPlayer().Character.Humanoid.Health = 0
+				UI.Notify("Ascida", "Stopped impersonating successfully!")
+			end
+
+			if UI.Storage.Impersonation.Username then
+				API.Impersonate(UI.Storage.Impersonation.Username)
+				UI.Notify("Ascida", "Switched to " .. UI.Storage.Impersonation.Username .. "!")
+			end
+		end)
+
+		UI.Storage.SelfSpoof = {}
+
+		UI.Groupbox:AddDivider()
+
+		UI.CreateDropdown("Settings", {
+			"Premium",
+			"Verified",
+			"Influencer",
+			"Roblox Employee",
+		}, function(value)
+			UI.Storage.SelfSpoof = value
+		end, 0, true)
+
+		UI.CreateToggle("Value", function(value)
+			if value then
+				local s = UI.Storage.SelfSpoof
+
+				API.SetAttribute("IsInfluencer", s["Influencer"] or false)
+				API.SetAttribute("IsRobloxEmployee", s["Roblox Employee"] or false)
+
+				API.SpoofLocalplayer({
+					["SpoofVerified"] = s["Verified"],
+					["SpoofPremium"] = s["Premium"],
+				})
+
+				UI.Notify("Ascida", "Self spoof applied!")
+			end
+		end, false)
+	end
+	--[[
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Custom Dialogs", "message-circle")
+
+	do
+		UI.Storage["CD_DialogCount"] = 2
+		UI.Storage["CD_Dialogs"] = {}
+
+		for D = 1, 5 do
+			UI.Storage["CD_Dialogs"][D] = {
+				Image = nil,
+				Text = "",
+				ButtonCount = 1,
+				Buttons = {},
+			}
+
+			for B = 1, 5 do
+				UI.Storage["CD_Dialogs"][D].Buttons[B] = {
+					Text = "",
+					IsClose = false,
+					ActionKey = "",
+					Next = 0,
+				}
+			end
+		end
+
+		UI.Groupbox:AddDivider("Dialog Chain")
+
+		UI.CreateDropdown("Dialog Count", { "1", "2", "3", "4", "5" }, function(Value)
+			UI.Storage["CD_DialogCount"] = tonumber(Value)
+		end, 1, false)
+
+		for D = 1, 5 do
+			UI.Dependency = UI.Groupbox:AddDependencyBox()
+
+			UI.Dependency:SetupDependencies({
+				{ UI.Options["dialog count"], tostring(D) },
+			})
+
+			UI.Dependency:AddDivider("Dialog " .. D)
+
+			UI.Dependency:AddInput("cd img " .. D, {
+				Text = "Image (Optional)",
+				Placeholder = "rbxassetid:// or https://...",
+				Default = "",
+				Callback = function(Value)
+					UI.Storage["CD_Dialogs"][D].Image = (Value ~= "" and Value) or nil
+				end,
+			})
+
+			UI.Dependency:AddInput("cd text " .. D, {
+				Text = "Text",
+				Placeholder = "Dialog text...",
+				Default = "",
+				Callback = function(Value)
+					UI.Storage["CD_Dialogs"][D].Text = Value
+				end,
+			})
+
+			UI.Dependency:AddDropdown("btn count " .. D, {
+				Text = "Button Count",
+				Values = { "1", "2", "3", "4", "5" },
+				Default = 1,
+				Callback = function(Value)
+					UI.Storage["CD_Dialogs"][D].ButtonCount = tonumber(Value)
+				end,
+			})
+
+			for B = 1, 5 do
+				UI.Dependency = UI.Groupbox:AddDependencyBox()
+
+				UI.Dependency:SetupDependencies({
+					{ UI.Options["dialog count"], tostring(D) },
+					{ UI.Options["btn count " .. D], tostring(B) },
+				})
+
+				UI.Dependency:AddDivider("Dialog " .. D .. " > Button " .. B)
+
+				UI.Dependency:AddInput("btn text " .. D .. " " .. B, {
+					Text = "Text",
+					Placeholder = "e.g Continue",
+					Default = "",
+					Callback = function(Value)
+						UI.Storage["CD_Dialogs"][D].Buttons[B].Text = Value
+					end,
+				})
+
+				UI.Storage["CD_Dialogs"][D].Buttons[B].ActionKey = nil
+
+				UI.Dependency:AddDropdown("btn next " .. D .. " " .. B, {
+					Text = "Next Dialog",
+					Values = { "None", "1", "2", "3", "4", "5" },
+					Default = "None",
+					Callback = function(Value)
+						UI.Storage["CD_Dialogs"][D].Buttons[B].Next = (Value ~= "None" and tonumber(Value)) or 0
+					end,
+				})
+
+				UI.Dependency:AddToggle("btn close " .. D .. " " .. B, {
+					Text = "Use It As Close Button",
+					Default = false,
+					Callback = function(Value)
+						UI.Storage["CD_Dialogs"][D].Buttons[B].IsClose = Value
+					end,
+				})
+			end
+		end
+
+		UI.Groupbox:AddButton("Open Dialog", function()
+			if not UI.Storage["CD_Dialogs"][1].Text or UI.Storage["CD_Dialogs"][1].Text == "" then
+				UI.Notify("Ascida", "Dialog 1 text cannot be empty!")
+				return
+			end
+
+			local Built = {}
+			for D = 1, UI.Storage["CD_DialogCount"] do
+				local Data = UI.Storage["CD_Dialogs"][D]
+				Built[D] = {
+					Message = {
+						Image = Data.Image,
+						Text = Data.Text,
+					},
+					Buttons = {},
+				}
+			end
+
+			for D = 1, UI.Storage["CD_DialogCount"] do
+				local Data = UI.Storage["CD_Dialogs"][D]
+				local BtnCount = tonumber(UI.Options["btn count " .. D].Value) or Data.ButtonCount
+				for B = 1, BtnCount do
+					local Btn = Data.Buttons[B]
+					if Btn.Text ~= "" then
+						local NextRaw = UI.Options["btn next " .. D .. " " .. B].Value
+						local NextIndex = (NextRaw ~= "None" and tonumber(NextRaw)) or 0
+						table.insert(Built[D].Buttons, {
+							Text = Btn.Text,
+							IsCloseButton = Btn.IsClose,
+							ActionKey = Btn.ActionKey,
+							NextDialog = NextIndex ~= 0 and Built[NextIndex] or nil,
+						})
+					end
+				end
+			end
+
+			API.CreateDialog({
+				Dialog = Built[1],
+			})
+		end)
+	end
+]]
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Spoof Game Comparator", "table-properties")
+
+	do
+		UI.Storage["SGC_Enabled"] = false
+		UI.Storage["SGC_Comparator"] = "Jump Pad"
+		UI.Storage["SGC_Cosmetic"] = ""
+
+		local Callback = function()
+			if not UI.Storage["SGC_Enabled"] or UI.Storage["SGC_Cosmetic"] == "" then
+				return
+			end
+			if not API.IsRealSomething(UI.Storage["SGC_Cosmetic"]) then
+				return
+			end
+
+			UI.Notify("Ascida", "Spoofed " .. UI.Storage["SGC_Comparator"] .. " as " .. UI.Storage["SGC_Cosmetic"])
+			API.SpoofGameComparator(UI.Storage["SGC_Comparator"], UI.Storage["SGC_Cosmetic"])
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["SGC_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Comparator", {
+			"Jump Pad",
+			"Warper",
+			"Molotov",
+		}, function(value)
+			UI.Storage["SGC_Comparator"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateInput("Cosmetic", function(value)
+			UI.Storage["SGC_Cosmetic"] = value
+
+			Callback()
+		end, "e.g Spider Web", "", false)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Contracts Spoofer", "receipt-text")
+
+	do
+		UI.Storage["CS_Enabled"] = false
+		UI.Storage["CS_Weapon"] = "Assault Rifle"
+		UI.Storage["CS_Contract"] = "StatisticPlaytime"
+		UI.Storage["CS_ContractValue"] = 1
+
+		local Callback = function()
+			if not UI.Storage["CS_Enabled"] then
+				return
+			end
+
+			UI.Notify("Ascida", "Spoofed " .. UI.Storage["CS_Weapon"] .. "'s contract as " .. UI.Storage["CS_Contract"])
+			API.SpoofContract(UI.Storage["CS_Weapon"], UI.Storage["CS_Contract"], UI.Storage["CS_ContractValue"])
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["CS_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+			UI.Storage["CS_Weapon"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateDropdown("Contract", {
+			"Playtime",
+			"Eliminations",
+			"Damage Dealt",
+			"Damage Absorbed",
+			"Enemies Blinded",
+			"Players Frozen",
+			"Players Bounced",
+			"Players Empowered",
+			"Portals Spawned",
+			"Heals Given",
+			"Warps",
+			"Smokeds Enemies",
+			"Rounds Won",
+		}, function(value)
+			local ContractValues = {
+				["Playtime"] = "StatisticPlaytime",
+				["Eliminations"] = "StatisticEliminations",
+				["Damage Dealt"] = "StatisticDamageDealt",
+				["Damage Absorbed"] = "StatisticAbsorbs",
+				["Enemies Blinded"] = "StatisticBlindsEnemies",
+				["Players Frozen"] = "StatisticFreezesEnemies",
+				["Players Bounced"] = "StatisticBounces",
+				["Players Empowered"] = "StatisticEmpowers",
+				["Portals Spawned"] = "StatisticPortalsSpawned",
+				["Heals Given"] = "StatisticHealsGiven",
+				["Warps"] = "StatisticWarps",
+				["Smokeds Enemies"] = "StatisticSmokedsEnemies",
+				["Rounds Won"] = "StatisticRoundsWon",
+			}
+
+			UI.Storage["CS_Contract"] = ContractValues[value]
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateInput("Contract Value", function(value)
+			UI.Storage["CS_ContractValue"] = tonumber(value) or 1
+
+			Callback()
+		end, "e.g 1000", "1", true)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Region Spoofer", "earth")
+
+	do
+		UI.CreateInput("Region", API.SpoofRegion, workspace:GetAttribute("ServerRegion"), "", false)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Statistic Spoofer", "chart-bar")
+
+	do
+		UI.Storage["SS_Enabled"] = false
+		UI.Storage["SS_Statistic"] = "StatisticPlaytime"
+		UI.Storage["SS_StatisticValue"] = 1
+
+		local Callback = function()
+			if not UI.Storage["SS_Enabled"] then
+				return
+			end
+
+			UI.Notify("Ascida", "Spoofed " .. UI.Storage["SS_Statistic"] .. " statistic")
+			API.SpoofStatics(UI.Storage["SS_Statistic"], UI.Storage["SS_StatisticValue"])
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["SS_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateInput("Statistic Name", function(value)
+			UI.Storage["SS_Statistic"] = value
+		end, "e.g while sliding", "", false)
+
+		UI.CreateInput("Statistic Value", function(value)
+			UI.Storage["SS_StatisticValue"] = tonumber(value) or 1
+
+			Callback()
+		end, "e.g 1000", "1", true)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Battlepass Spoofer", "ticket")
+
+	do
+		UI.Storage["BS_Enabled"] = false
+		UI.Storage["BS_ChoosedPass"] = 1
+
+		local Callback = function()
+			if not UI.Storage["BS_Enabled"] then
+				return
+			end
+
+			UI.Notify(
+				"Ascida",
+				"Spoofed Battlepass as " .. (UI.Storage["BS_ChoosedPass"] == 1 and "Standart" or "Prime")
+			)
+			API.SpoofSeasonBundle(UI.Storage["BS_ChoosedPass"])
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["BS_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateDropdown("Bundle", {
+			"Standart",
+			"Prime",
+		}, function(value)
+			local BundleForValue = {
+				["Standart"] = 1,
+				["Prime"] = 2,
+			}
+
+			UI.Storage["BS_ChoosedPass"] = BundleForValue[value]
+
+			Callback()
+		end, 1)
+	end
+
+	do
+		UI.Groupbox = UI.Tabs.World:AddLeftGroupbox("Arms", "biceps-flexed")
+
+		UI.CreateToggle("No Arms", API.ArmsVisible, false)
+
+		UI.Groupbox = UI.Tabs.World:AddLeftGroupbox("Environment", "palette")
+
+		UI.Groupbox:AddDivider("Color")
+
+		UI.Storage.ColorCorrection = { Enabled = false, Saturation = 0, Contrast = 0, Brightness = 0 }
+
+		UI.CreateToggle("Color Correction", function(Value)
+			UI.Storage.ColorCorrection.Enabled = Value
+			if Value then
+				API.SetColorCorrection(
+					UI.Storage.ColorCorrection.Saturation,
+					UI.Storage.ColorCorrection.Contrast,
+					UI.Storage.ColorCorrection.Brightness
+				)
+			else
+				API.SetColorCorrection(0, 0, 0)
+			end
+		end, false)
+
+		UI.CreateSlider("Saturation", 0, -1, 1, 2, function(Value)
+			UI.Storage.ColorCorrection.Saturation = Value
+			if UI.Storage.ColorCorrection.Enabled then
+				API.SetColorCorrection(
+					Value,
+					UI.Storage.ColorCorrection.Contrast,
+					UI.Storage.ColorCorrection.Brightness
+				)
+			end
+		end)
+
+		UI.CreateSlider("Contrast", 0, -1, 1, 2, function(Value)
+			UI.Storage.ColorCorrection.Contrast = Value
+			if UI.Storage.ColorCorrection.Enabled then
+				API.SetColorCorrection(
+					UI.Storage.ColorCorrection.Saturation,
+					Value,
+					UI.Storage.ColorCorrection.Brightness
+				)
+			end
+		end)
+
+		UI.CreateSlider("Brightness", 0, -1, 1, 2, function(Value)
+			UI.Storage.ColorCorrection.Brightness = Value
+			if UI.Storage.ColorCorrection.Enabled then
+				API.SetColorCorrection(
+					UI.Storage.ColorCorrection.Saturation,
+					UI.Storage.ColorCorrection.Contrast,
+					Value
+				)
+			end
+		end)
+
+		UI.Groupbox:AddDivider("Atmosphere")
+
+		UI.CreateInput("Ambient", function(Value)
+			local R, G, B = Value:match("(%d+),(%d+),(%d+)")
+			if R then
+				API.SetAmbient(Color3.fromRGB(tonumber(R), tonumber(G), tonumber(B)))
+			end
+		end, "R,G,B", "128,128,128", false)
+
+		UI.CreateInput("ColorShift Bottom", function(Value)
+			local R, G, B = Value:match("(%d+),(%d+),(%d+)")
+			if R then
+				API.SetColorShiftBottom(Color3.fromRGB(tonumber(R), tonumber(G), tonumber(B)))
+			end
+		end, "R,G,B", "0,0,0", false)
+
+		UI.CreateInput("ColorShift Top", function(Value)
+			local R, G, B = Value:match("(%d+),(%d+),(%d+)")
+			if R then
+				API.SetColorShiftTop(Color3.fromRGB(tonumber(R), tonumber(G), tonumber(B)))
+			end
+		end, "R,G,B", "0,0,0", false)
+
+		UI.CreateInput("Fog Color", function(Value)
+			local R, G, B = Value:match("(%d+),(%d+),(%d+)")
+			if R then
+				API.SetFogColor(Color3.fromRGB(tonumber(R), tonumber(G), tonumber(B)))
+			end
+		end, "R,G,B", "192,192,192", false)
+
+		UI.CreateSlider("FogEnd", 2500, 0, 10000, 0, function(Value)
+			API.SetFogEnd(Value)
+		end)
+		UI.CreateSlider("FogStart", 0, 0, 5000, 0, function(Value)
+			API.SetFogStart(Value)
+		end)
+		UI.CreateSlider("ExposureCompensation", 0, -4, 4, 2, function(Value)
+			API.SetExposureCompensation(Value)
+		end)
+		UI.CreateSlider("Brightness", 3, 0, 10, 1, function(Value)
+			API.SetBrightness(Value)
+		end)
+		UI.CreateSlider("ClockTime", 12, 0, 24, 1, function(Value)
+			API.SetClockTime(Value)
+		end)
+
+		UI.CreateToggle("GlobalShadows", function(Value)
+			API.SetGlobalShadows(Value)
+		end, true)
+
+		UI.CreateDropdown("Technology", {
+			"Compatibility",
+			"Voxel",
+			"ShadowMap",
+			"Future",
+		}, function(Value)
+			API.SetTechnology(Enum.Technology[Value])
+		end, "Future", false)
+
+		UI.Groupbox = UI.Tabs.World:AddRightGroupbox("Sky", "sun")
+
+		UI.Storage.SkyboxEnabled = false
+		UI.Storage.SkyboxSelected = "Saturn"
+
+		UI.CreateToggle("Skybox Enabled", function(Value)
+			UI.Storage.SkyboxEnabled = Value
+
+			API.SetSkybox(Value and UI.Storage.SkyboxSelected or nil)
+		end, false)
+
+		UI.CreateDropdown("Selected", {
+			"Saturn",
+			"Earth",
+			"Spongebob",
+			"Sunset",
+			"Nebula",
+		}, function(Value)
+			UI.Storage.SkyboxSelected = Value
+
+			if UI.Storage.SkyboxEnabled then
+				API.SetSkybox(Value)
+			end
+		end, 1)
+
+		UI.Groupbox:AddDivider("Bloom")
+
+		UI.Storage.Bloom = { Enabled = false, Intensity = 0.6, Size = 26, Threshold = 0.4 }
+
+		UI.CreateToggle("Bloom Enabled", function(Value)
+			UI.Storage.Bloom.Enabled = Value
+			API.SetBloom(Value, UI.Storage.Bloom.Intensity, UI.Storage.Bloom.Size, UI.Storage.Bloom.Threshold)
+		end, false)
+
+		UI.CreateSlider("Intensity", 0.6, 0, 1, 2, function(Value)
+			UI.Storage.Bloom.Intensity = Value
+			if UI.Storage.Bloom.Enabled then
+				API.SetBloom(true, Value, UI.Storage.Bloom.Size, UI.Storage.Bloom.Threshold)
+			end
+		end)
+
+		UI.CreateSlider("Size", 26, 1, 56, 0, function(Value)
+			UI.Storage.Bloom.Size = Value
+			if UI.Storage.Bloom.Enabled then
+				API.SetBloom(true, UI.Storage.Bloom.Intensity, Value, UI.Storage.Bloom.Threshold)
+			end
+		end)
+
+		UI.CreateSlider("Threshold", 0.4, 0, 1, 2, function(Value)
+			UI.Storage.Bloom.Threshold = Value
+			if UI.Storage.Bloom.Enabled then
+				API.SetBloom(true, UI.Storage.Bloom.Intensity, UI.Storage.Bloom.Size, Value)
+			end
+		end)
+
+		UI.Groupbox:AddDivider("Sun Rays")
+
+		UI.Storage.SunRays = { Enabled = false, Intensity = 0.1 }
+
+		UI.CreateToggle("Sun Rays Enabled", function(Value)
+			UI.Storage.SunRays.Enabled = Value
+			API.SetSunRays(Value, UI.Storage.SunRays.Intensity)
+		end, false)
+
+		UI.CreateSlider("Sun Intensity", 0.1, 0, 1, 2, function(Value)
+			UI.Storage.SunRays.Intensity = Value
+			if UI.Storage.SunRays.Enabled then
+				API.SetSunRays(true, Value)
+			end
+		end)
+
+		UI.Groupbox = UI.Tabs.World:AddRightGroupbox("Camera", "camera")
+
+		UI.CreateToggle("Anti Flashbang", function(Value)
+			API.AntiFlashbang(Value)
+		end, false)
+
+		UI.CreateSlider("FOV", 70, 60, 120, 0, function(Value)
+			API.SetFOV(Value)
+		end)
+
+		UI.Groupbox:AddDivider("aspect ratio")
+
+		UI.CreateSlider("Ratio", 1, 0.1, 2, 2, function(Value)
+			API.SetAspectRatio(Value)
+		end)
+
+		UI.Groupbox:AddButton("Reset Aspect Ratio", function()
+			API.RemoveAspectRatio()
+		end)
+
+		UI.Groupbox:AddDivider()
+
+		UI.CreateSlider("Blur", 0, 0, 56, 0, function(Value)
+			API.SetBlur(Value)
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Player Editor", "pen")
+
+	do
+		UI.CreateDropdown("Platform", {
+			"MouseKeyboard",
+			"Touch",
+			"Gamepad",
+			"Car",
+			"Speaker",
+			"Fuel",
+			"Tank",
+		}, function(value)
+			local imageboards = {
+				["Car"] = "438219160",
+				["Speaker"] = "3120638122",
+				["Fuel"] = "112405350690306",
+				["Tank"] = "73704645969842",
+			}
+
+			if value == "MouseKeyboard" or value == "Touch" or value == "Gamepad" then
+				API.SetControls(value)
+				UI.Notify("Ascida", "Successfully set your platform to " .. value)
+			elseif value ~= "URL" and value ~= "ID" then
+				local asset = imageboards[value]
+				if asset and asset ~= "" then
+					API.SetCustomControls(asset)
+					UI.Notify("Ascida", "Successfully set your platform to " .. value)
+				end
+			end
+		end, 0, false)
+
+		UI.CreateInput("Display Name", function(value)
+			API.SpoofLocalplayer({
+				["SpoofDisplay"] = value,
+			})
+		end, API.GetLocalPlayer().DisplayName, API.GetLocalPlayer().Name, false)
+
+		UI.CreateInput("Username", function(value)
+			API.SpoofLocalplayer({
+				["SpoofUsername"] = value,
+			})
+		end, API.GetLocalPlayer().Name, API.GetLocalPlayer().Name, false)
+
+		UI.CreateInput(
+			"Winstreak",
+			function(value)
+				API.SetAttribute("StatisticDuelsWinStreak", tonumber(value), true)
+			end,
+			API.GetLocalPlayer():GetAttribute("StatisticDuelsWinStreak"),
+			API.GetLocalPlayer():GetAttribute("StatisticDuelsWinStreak"),
+			true
+		)
+
+		UI.CreateInput("Level", function(value)
+			API.SetAttribute("Level", tonumber(value), true)
+		end, API.GetLocalPlayer():GetAttribute("Level"), API.GetLocalPlayer():GetAttribute("Level"), true)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Leaderboard Spoof", "crown")
+
+	do
+		UI.Storage["LS_Type"] = "Highest ELO"
+		UI.Storage["LS_Position"] = 1
+		UI.Storage["LS_Value"] = 1
+
+		UI.CreateDropdown("Leaderboard", {
+			"Highest ELO",
+			"Current Highest Win Streak",
+			"Most Eliminations",
+			"Most Wins",
+			"Highest Level",
+		}, function(value)
+			UI.Storage["LS_Type"] = value
+		end, 0, false)
+
+		UI.CreateInput("Position", function(value)
+			UI.Storage["LS_Position"] = value or 1
+		end, "...", "", true)
+
+		UI.CreateInput("Value", function(value)
+			UI.Storage["LS_Value"] = value or 1
+		end, "...", "", true)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Spoof", function()
+			API.SpoofLeaderboard(UI.Storage["LS_Type"], UI.Storage["LS_Position"], UI.Storage["LS_Value"])
+			UI.Notify("Ascida", "Spoofed!")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Duel History Spoofer", "history")
+
+	do
+		UI.Storage["DHS_DuelHistory"] = {
+			QueueName = "Ranked1v1",
+			Map = "Arena",
+			Score1 = 2,
+			Score2 = 1,
+			Eliminations = 2,
+			Deaths = 0,
+			Assists = 1,
+			Damage = 420,
+			Enemy1Name = "",
+			Enemy1ELO = 3500,
+			Enemy2Name = "",
+			Enemy2ELO = 3000,
+			TeammateName = "",
+			TeammateELO = 676767,
+		}
+
+		UI.CreateDropdown("Queue", {
+			"Ranked1v1",
+			"Ranked2v2",
+			"Casual1v1",
+			"Casual2v2",
+		}, function(value)
+			UI.Storage["DHS_DuelHistory"].QueueName = value
+		end, "Ranked1v1", false)
+
+		local MapKeys = {}
+		for Name in pairs(require(Services.ReplicatedStorage.Modules.DuelLibrary).Maps) do
+			table.insert(MapKeys, Name)
+		end
+		table.sort(MapKeys)
+
+		UI.CreateDropdown("Map", MapKeys, function(value)
+			UI.Storage["DHS_DuelHistory"].Map = value
+		end, 1, false)
+
+		UI.CreateInput("Score (Win)", function(v)
+			UI.Storage["DHS_DuelHistory"].Score1 = tonumber(v) or 2
+		end, "2", "2", true)
+		UI.CreateInput("Score (Loss)", function(v)
+			UI.Storage["DHS_DuelHistory"].Score2 = tonumber(v) or 1
+		end, "1", "1", true)
+		UI.CreateInput("Eliminations", function(v)
+			UI.Storage["DHS_DuelHistory"].Eliminations = tonumber(v) or 0
+		end, "0", "0", true)
+		UI.CreateInput("Deaths", function(v)
+			UI.Storage["DHS_DuelHistory"].Deaths = tonumber(v) or 0
+		end, "0", "0", true)
+		UI.CreateInput("Assists", function(v)
+			UI.Storage["DHS_DuelHistory"].Assists = tonumber(v) or 0
+		end, "0", "0", true)
+		UI.CreateInput("Damage", function(v)
+			UI.Storage["DHS_DuelHistory"].Damage = tonumber(v) or 0
+		end, "0", "0", true)
+
+		UI.Groupbox:AddDivider("enemy team")
+
+		UI.CreateInput("Enemy 1 Username", function(v)
+			UI.Storage["DHS_DuelHistory"].Enemy1Name = v
+		end, "Roblox", "", false)
+		UI.CreateInput("Enemy 1 ELO", function(v)
+			UI.Storage["DHS_DuelHistory"].Enemy1ELO = tonumber(v) or 3500
+		end, "3500", "3500", true)
+		UI.CreateInput("Enemy 2 Username", function(v)
+			UI.Storage["DHS_DuelHistory"].Enemy2Name = v
+		end, "(2v2 only)", "", false)
+		UI.CreateInput("Enemy 2 ELO", function(v)
+			UI.Storage["DHS_DuelHistory"].Enemy2ELO = tonumber(v) or 3000
+		end, "3000", "3000", true)
+
+		UI.Groupbox:AddDivider("your team")
+
+		UI.CreateInput("Teammate Username", function(v)
+			UI.Storage["DHS_DuelHistory"].TeammateName = v
+		end, "(2v2 only)", "", false)
+		UI.CreateInput("Teammate ELO", function(v)
+			UI.Storage["DHS_DuelHistory"].TeammateELO = tonumber(v) or 676767
+		end, "676767", "676767", true)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Apply", function()
+			local LocalPlayer = API.GetLocalPlayer()
+			local Is2v2 = UI.Storage["DHS_DuelHistory"].QueueName:find("2v2")
+
+			local function GetId(name)
+				if not name or name == "" then
+					return 0
+				end
+				local ok, id = pcall(function()
+					return Services.Players:GetUserIdFromNameAsync(name)
+				end)
+				return (ok and id) or 0
+			end
+
+			local Enemy1Id = GetId(d.Enemy1Name)
+			local Enemy2Id = GetId(d.Enemy2Name)
+			local TeammateId = GetId(d.TeammateName)
+
+			local Duelers = {
+				{
+					UserID = LocalPlayer.UserId,
+					TeamIndex = 1,
+					DisplayName = LocalPlayer.DisplayName,
+					Eliminations = UI.Storage["DHS_DuelHistory"].Eliminations,
+					Deaths = UI.Storage["DHS_DuelHistory"].Deaths,
+					Assists = UI.Storage["DHS_DuelHistory"].Assists,
+					Damage = UI.Storage["DHS_DuelHistory"].Damage,
+					IsMVP = true,
+					DisplayELO = 676767,
+				},
+				{
+					UserID = Enemy1Id,
+					TeamIndex = 2,
+					DisplayName = UI.Storage["DHS_DuelHistory"].Enemy1Name ~= "" and d.Enemy1Name or "Opponent",
+					Eliminations = UI.Storage["DHS_DuelHistory"].Deaths,
+					Deaths = UI.Storage["DHS_DuelHistory"].Eliminations,
+					Assists = 0,
+					Damage = math.floor(UI.Storage["DHS_DuelHistory"].Damage / 2),
+					IsMVP = false,
+					DisplayELO = UI.Storage["DHS_DuelHistory"].Enemy1ELO,
+				},
+			}
+
+			if Is2v2 then
+				table.insert(Duelers, {
+					UserID = TeammateId,
+					TeamIndex = 1,
+					DisplayName = UI.Storage["DHS_DuelHistory"].TeammateName ~= ""
+							and UI.Storage["DHS_DuelHistory"].TeammateName
+						or "Teammate",
+					Eliminations = math.floor(UI.Storage["DHS_DuelHistory"].Eliminations / 2),
+					Deaths = math.floor(UI.Storage["DHS_DuelHistory"].Deaths / 2),
+					Assists = UI.Storage["DHS_DuelHistory"].Assists,
+					Damage = math.floor(UI.Storage["DHS_DuelHistory"].Damage / 2),
+					IsMVP = false,
+					DisplayELO = UI.Storage["DHS_DuelHistory"].TeammateELO,
+				})
+
+				table.insert(Duelers, {
+					UserID = Enemy2Id,
+					TeamIndex = 2,
+					DisplayName = UI.Storage["DHS_DuelHistory"].Enemy2Name ~= ""
+							and UI.Storage["DHS_DuelHistory"].Enemy2Name
+						or "Opponent 2",
+					Eliminations = math.floor(UI.Storage["DHS_DuelHistory"].Deaths / 2),
+					Deaths = math.floor(UI.Storage["DHS_DuelHistory"].Eliminations / 2),
+					Assists = 0,
+					Damage = math.floor(UI.Storage["DHS_DuelHistory"].Damage / 3),
+					IsMVP = false,
+					DisplayELO = d.Enemy2ELO,
+				})
+			end
+
+			API.SpoofDuelHistory({
+				{
+					IsRageQuit = false,
+					QueueName = UI.Storage["DHS_DuelHistory"].QueueName,
+					Map = UI.Storage["DHS_DuelHistory"].Map,
+					NumTeams = 2,
+					Scores = { UI.Storage["DHS_DuelHistory"].Score1, UI.Storage["DHS_DuelHistory"].Score2 },
+					WinningTeamIndex = 1,
+					LogID = nil,
+					Duelers = Duelers,
+				},
+			})
+
+			UI.Notify("Ascida", "Duel history spoofed!")
+		end)
+
+		UI.Groupbox:AddButton("Reset", function()
+			API.ResetDuelHistory()
+			UI.Notify("Ascida", "Duel history reset!")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddRightGroupbox("Resource Spoofer", "coins")
+
+	do
+		UI.Storage.Resource = {
+			ResourceName = "WeaponKeys",
+			ResourceValue = 0,
+		}
+
+		UI.CreateDropdown("Resource", {
+			"Keys",
+			"Tokens",
+			"Currency",
+			"Glory",
+			"Skin Tickets",
+		}, function(value)
+			local Originals = {
+				["Keys"] = "WeaponKeys",
+				["Tokens"] = "UnlockTokens",
+				["Currency"] = "EventCurrency",
+				["Glory"] = "Glory",
+				["Skin Tickets"] = "SkinTickets",
+			}
+
+			UI.Storage.Resource.ResourceName = Originals[value]
+
+			API.SpoofResource(UI.Storage.Resource.ResourceName, UI.Storage.Resource.ResourceValue)
+		end, 1, false)
+
+		UI.CreateInput("Amount", function(value)
+			UI.Storage.Resource.ResourceValue = value
+
+			API.SpoofResource(UI.Storage.Resource.ResourceName, UI.Storage.Resource.ResourceValue)
+		end, "", "0", true)
+	end
+
+	UI.Groupbox = UI.Tabs.Spoofer:AddLeftGroupbox("Profile Spoofer", "id-card")
+
+	do
+		UI.Storage.RankInfo = {}
+
+		for _, input in ipairs({
+			{ "ELO", true },
+			{ "Ranked Wins", true },
+			{ "Casual Wins", true },
+			{ "Ranked Wins Percent", true },
+			{ "Casual Win Percent", true },
+			{ "Weapon 1", false, "Assault Rifle" },
+			{ "Weapon 2", false, "Handgun" },
+			{ "Weapon 3", false, "Knife" },
+			{ "Weapon 4", false, "Grenade" },
+		}) do
+			local Title = input[1]
+			local Numeric = input[2]
+			local Default = input[3] or nil
+
+			task.wait(0.1)
+
+			UI.CreateInput(Title, function(value)
+				UI.Storage.RankInfo[Title] = value
+			end, "...", Numeric and "100" or Default or "Assault Rifle", Numeric)
+		end
+
+		local MapKeys = {}
+
+		for Name in pairs(require(Services.ReplicatedStorage.Modules.DuelLibrary).Maps) do
+			table.insert(MapKeys, Name)
+		end
+
+		table.sort(MapKeys)
+
+		UI.CreateDropdown("Favorite Map", MapKeys, function(value)
+			UI.Storage.RankInfo["Favorite Map"] = value
+		end, 1, false)
+
+		UI.Groupbox:AddButton("Apply", function()
+			local JSON = {
+				Elo = UI.Storage.RankInfo["ELO"] or 100,
+				RankedWins = UI.Storage.RankInfo["Ranked Wins"] or 100,
+				CasualWins = UI.Storage.RankInfo["Casual Wins"] or 100,
+				RankedWinPercent = UI.Storage.RankInfo["Ranked Wins Percent"] or 100,
+				CasualWinPercent = UI.Storage.RankInfo["Casual Wins Percent"] or 100,
+				FavoriteMap = UI.Storage.RankInfo["Favorite Map"] or "Arena",
+				FavoriteWeapons = {
+					{ Name = UI.Storage.RankInfo["Weapon 1"] or "Assault Rifle" },
+					{ Name = UI.Storage.RankInfo["Weapon 2"] or "Handgun" },
+					{ Name = UI.Storage.RankInfo["Weapon 3"] or "Knife" },
+					{ Name = UI.Storage.RankInfo["Weapon 4"] or "Grenade" },
+				},
+			}
+
+			API.SpoofProfile(JSON)
+
+			UI.Notify("Ascida", "Successfully applied!")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Inventory:AddRightGroupbox("Inject", "syringe")
+
+	do
+		UI.Storage["I_Quantity"] = 1
+		UI.Storage["I_Name"] = "Skin Case"
+		UI.Storage["I_Enabled"] = false
+
+		local Callback = function()
+			if UI.Storage["I_Enabled"] then
+				API.InjectToBackpack(UI.Storage["I_Name"], UI.Storage["I_Quantity"])
+				UI.Notify(
+					"Ascida",
+					"Injected " .. UI.Storage["I_Name"] .. " (Quantity: " .. UI.Storage["I_Quantity"] .. ")"
+				)
+			end
+		end
+
+		UI.CreateToggle("Enabled", function(value)
+			UI.Storage["I_Enabled"] = value
+
+			Callback()
+		end, false)
+
+		UI.CreateSlider("Quantity", 1, 1, 100, 0, function(value)
+			UI.Storage["I_Quantity"] = value
+
+			Callback()
+		end)
+
+		local NewPools = {}
+		for Item, _ in pairs(API.Pools) do
+			table.insert(NewPools, Item)
+		end
+		table.sort(NewPools)
+
+		UI.CreateDropdown("Name", NewPools, function(value)
+			UI.Storage["I_Name"] = value
+
+			Callback()
+		end, 13, false)
+	end
+
+	UI.Groupbox = UI.Tabs.Inventory:AddLeftGroupbox("Bulk", "boxes")
+
+	do
+		UI.Storage["B_Quantity"] = 1
+
+		UI.CreateSlider("Quantity", 1, 1, 99, 0, function(value)
+			UI.Storage["B_Quantity"] = value
+		end)
+
+		UI.Groupbox:AddButton("Inject", function()
+			for Item, _ in pairs(API.Pools) do
+				API.InjectToBackpack(Item, UI.Storage["B_Quantity"])
+			end
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Inventory:AddLeftGroupbox("Create Custom Cosmetic", "copy-check")
+
+	do
+		UI.Storage["CCC_Type"] = "Skin"
+		UI.Storage["CCC_Name"] = ""
+		UI.Storage["CCC_Wrap1"] = "SmoothPlastic"
+		UI.Storage["CCC_Wrap2"] = "SmoothPlastic"
+		UI.Storage["CCC_Wrap3"] = "Neon"
+		UI.Storage["CCC_Rarity"] = "Unobtainable"
+		UI.Storage["CCC_Description"] = "Cool Cosmetic!"
+		UI.Storage["CCC_Weapon"] = "Assault Rifle"
+
+		local Callback = function(Type)
+			if UI.Storage["CCC_Name"] == "" or Type == "" then
+				UI.Notify("Ascida", "Cosmetic name can't be empty!")
+				return
+			end
+
+			if Type == "create" then
+				if UI.Storage["CCC_Type"] == "Wrap" then
+					API.CreateCosmetic("Wrap", UI.Storage["CCC_Name"], {
+						color1 = UI.Storage["CCC_Main"] or Color3.fromRGB(255, 255, 255),
+						color2 = UI.Storage["CCC_Detail"] or Color3.fromRGB(17, 17, 17),
+						color3 = UI.Storage["CCC_Accent"] or Color3.fromRGB(255, 255, 255),
+						wrap1 = UI.Storage["CCC_Wrap1"],
+						wrap2 = UI.Storage["CCC_Wrap2"],
+						wrap3 = UI.Storage["CCC_Wrap3"],
+						rarity = UI.Storage["CCC_Rarity"],
+						description = UI.Storage["CCC_Description"],
+					})
+				elseif UI.Storage["CCC_Type"] == "Skin" then
+					API.CreateCosmetic("Skin", UI.Storage["CCC_Name"], {
+						weaponName = UI.Storage["CCC_Weapon"],
+						rarity = UI.Storage["CCC_Rarity"],
+						description = UI.Storage["CCC_Description"],
+					})
+				end
+			elseif Type == "delete" then
+				if API.Library.CosmeticLibrary.Cosmetics[UI.Storage["CCC_Name"]] then
+					API.Library.CosmeticLibrary.Cosmetics[UI.Storage["CCC_Name"]] = nil
+
+					local index = table.find(API.Library.CosmeticLibrary.CosmeticsAlphabetized, UI.Storage["CCC_Name"])
+					if index then
+						table.remove(API.Library.CosmeticLibrary.CosmeticsAlphabetized, index)
+					end
+
+					UI.Notify("Ascida", "Cosmetic deleted: " .. UI.Storage["CCC_Name"])
+				else
+					UI.Notify("Ascida", "Cosmetic not found: " .. UI.Storage["CCC_Name"])
+				end
+			end
+		end
+
+		UI.CreateDropdown("Type", {
+			"Skin",
+			"Wrap",
+		}, function(value)
+			UI.Storage["CCC_Type"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateDropdown("Rarity", {
+			"Unobtainable",
+			"Mythical",
+			"Legendary",
+			"Epic",
+			"Rare",
+			"Common",
+			"Unique",
+		}, function(value)
+			UI.Storage["CCC_Rarity"] = value
+
+			Callback()
+		end, 1, false)
+
+		UI.CreateInput("Name", function(value)
+			UI.Storage["CCC_Name"] = value
+
+			Callback()
+		end, "e.g Red Camo", "", false)
+
+		UI.CreateInput("Description", function(value)
+			UI.Storage["CCC_Description"] = value
+
+			Callback()
+		end, "e.g Coolest My Cosmetic!", "Cool Cosmetic!", false)
+
+		do
+			UI.Dependency = UI.Groupbox:AddDependencyBox()
+
+			UI.CreateDropdown("Weapon", API.GetWeapons(), function(value)
+				UI.Storage["CCC_Weapon"] = value
+			end, 1, false, UI.Dependency)
+
+			UI.Dependency:SetupDependencies({
+				{ UI.Options["type"], "Skin" },
+			})
+		end
+
+		do
+			UI.Dependency = UI.Groupbox:AddDependencyBox()
+
+			UI.Dependency:AddLabel("Detail Color"):AddColorPicker("AccentColor", {
+				Default = Color3.fromRGB(255, 255, 255),
+				Title = "Detail Color",
+				Callback = function(color)
+					UI.Storage["CCC_Detail"] = color
+				end,
+			})
+
+			UI.CreateDropdown("Material", API.GetEnums(Enum.Material), function(value)
+				UI.Storage["CCC_Wrap1"] = value
+
+				Callback()
+			end, 1, false, UI.Dependency)
+
+			UI.Dependency:AddLabel("Main Color"):AddColorPicker("AccentColor", {
+				Default = Color3.fromRGB(255, 255, 255),
+				Title = "Main Color",
+				Callback = function(color)
+					UI.Storage["CCC_Main"] = color
+				end,
+			})
+
+			UI.CreateDropdown("Material", API.GetEnums(Enum.Material), function(value)
+				UI.Storage["CCC_Wrap2"] = value
+
+				Callback()
+			end, 1, false, UI.Dependency)
+
+			UI.Dependency:AddLabel("Accent Color"):AddColorPicker("AccentColor", {
+				Default = Color3.fromRGB(255, 255, 255),
+				Title = "Accent Color",
+				Callback = function(color)
+					UI.Storage["CCC_Accent"] = color
+				end,
+			})
+
+			UI.CreateDropdown("Material", API.GetEnums(Enum.Material), function(value)
+				UI.Storage["CCC_Wrap3"] = value
+
+				Callback()
+			end, 1, false, UI.Dependency)
+
+			UI.Dependency:SetupDependencies({
+				{ UI.Options["type"], "Wrap" },
+			})
+		end
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Create", function()
+			Callback("create")
+		end)
+
+		UI.Groupbox:AddButton("Delete", function()
+			Callback("delete")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Configuration:AddRightGroupbox("Fast Options", "zap")
+
+	do
+		UI.CreateToggle("Unlock Unobtainable", function(value)
+			if value then
+				API.UnlockCosmeticsByRarity("Unobtainable")
+				UI.Notify("Ascida", "Unlocked unobtainable cosmetics!")
+			else
+				API.LockCosmeticsByRarity("Unobtainable")
+				UI.Notify("Ascida", "Locked unobtainable cosmetics!")
+			end
+		end, false)
+
+		UI.CreateToggle("Unlock Weapons", function(value)
+			if value then
+				API.UnlockWeapons()
+				UI.Notify("Ascida", "Unlocked all weapons!")
+			else
+				API.LockWeapons()
+				UI.Notify("Ascida", "Locked all weapons!")
+			end
+		end, false)
+
+		UI.Groupbox:AddDivider()
+
+		UI.Groupbox:AddButton("Unlock Everything", function()
+			API.UnlockCosmetics()
+			UI.Notify("Ascida", "Unlocked all cosmetics!")
+		end)
+
+		UI.Groupbox:AddButton("Lock Everything", function()
+			API.LockCosmetics()
+			UI.Notify("Ascida", "Locked all cosmetics!")
+		end)
+	end
+
+	UI.Groupbox = UI.Tabs.Configuration:AddRightGroupbox("Watermark", "circle-dashed")
+
+	do
+		UI.Storage["W_Enabled"] = false
+		UI.Storage["W_ShowFPS"] = true
+		UI.Storage["W_ShowPing"] = true
+		UI.Storage["W_ShowPlayer"] = true
+
+		UI.CreateToggle("Watermark Enabled", function(value)
+			UI.Storage["W_Enabled"] = value
+		end, false, "Enables watermark")
+
+		UI.CreateToggle("Show FPS", function(value)
+			UI.Storage["W_ShowFPS"] = value
+		end, true, "Shows FPS")
+
+		UI.CreateToggle("Show Ping", function(value)
+			UI.Storage["W_ShowPing"] = value
+		end, true, "Shows ping")
+
+		UI.CreateToggle("Show Player", function(value)
+			UI.Storage["W_ShowPlayer"] = value
+		end, true, "Shows local player name")
+
+		do
+			local LocalPlayer = API.GetLocalPlayer()
+
+			local Watermark = UI.Library:AddDraggableLabel("Ascida")
+
+			local FrameTimer = tick()
+			local FrameCounter = 0
+			local FPS = 60
+
+			Services.RunService.RenderStepped:Connect(function()
+				Watermark:SetVisible(UI.Storage["W_Enabled"])
+
+				FrameCounter += 1
+				if (tick() - FrameTimer) >= 1 then
+					FPS = FrameCounter
+					FrameTimer = tick()
+					FrameCounter = 0
+				end
+
+				local parts = {}
+
+				table.insert(parts, "Ascida")
+
+				if UI.Storage["W_ShowPlayer"] then
+					table.insert(parts, LocalPlayer.Name)
+				end
+
+				if UI.Storage["W_ShowFPS"] then
+					table.insert(parts, tostring(math.floor(FPS)) .. " FPS")
+				end
+
+				if UI.Storage["W_ShowPing"] then
+					local ping = math.floor(Services.Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+					table.insert(parts, ping .. " ms")
+				end
+
+				Watermark:SetText(table.concat(parts, " | "))
+			end)
+		end
+	end
+
+	do
+		UI.ThemeManager:SetLibrary(UI.Library)
+		UI.ThemeManager:ApplyToTab(UI.Tabs.Configuration)
+	end
+end
+
+do
+	local function IsVisible(obj)
+		local current = obj
+		while current do
+			if current:IsA("GuiObject") and not current.Visible then
+				return false
+			end
+			current = current.Parent
+		end
+		return true
+	end
+
+	local TargetLabel = nil
+
+	for _, v in ipairs(Services.CoreGui:GetDescendants()) do
+		if v:IsA("TextLabel") and v.Text == "discord.gg/ascida ・ Premium" then
+			TargetLabel = v
+			break
+		end
+	end
+
+	Services.RunService.Heartbeat:Connect(function()
+		if not TargetLabel then
+			return
+		end
+	end)
+end
+
+API.Initialize()
